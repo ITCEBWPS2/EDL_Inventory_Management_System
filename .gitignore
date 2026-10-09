@@ -1,0 +1,5 @@
+node_modules/
+.env
+dist/
+server_memory_backup.json
+server/server_memory_backup.json

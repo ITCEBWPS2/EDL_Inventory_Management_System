@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #10233B;
+  --surface: #FAFAF9;
+  --card: #FFFFFF;
+  --line: #E1E4E8;
+  --slate: #5B6B7C;
+  --signal: #E8A23A;
+  --signal-hover: #D6922C;
+  --signal-light: #FDF5E8;
+
+  --color-in: #2F7A5C;
+  --color-in-bg: rgba(47, 122, 92, 0.12);
+  --color-out: #B4483A;
+  --color-out-bg: rgba(180, 72, 58, 0.12);
+  --color-transfer: #5B6B7C;
+  --color-transfer-bg: rgba(91, 107, 124, 0.12);
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Tabular numbers for item codes, quantities, vouchers, serials */
+.tabular-nums {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom Scrollbar for operational tables & sidebars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F1F3F5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #C4C9D0;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9DA6B2;
+}
+
+/* Sticky first column in tables */
+.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background-color: inherit;
+}
+
+/* Print styles for audit reports and verifications */
+@media print {
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+  .no-print,
+  aside,
+  header,
+  footer,
+  #sidebar-transactions-toggle,
+  #btn-back,
+  #btn-back-verification,
+  button:not(.print-include) {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body, main {
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+}
