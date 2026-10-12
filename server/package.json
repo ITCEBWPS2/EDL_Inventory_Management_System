@@ -10,6 +10,8 @@
     "seed": "node src/scripts/seed.js",
     "migrate:units": "node src/scripts/migrate-units-horana.js",
     "migrate:unit-order": "node src/scripts/migrate-unit-order.js",
+    "migrate:unit-locations": "node src/scripts/migrate-unit-locations.js",
+    "migrate:unit-codes": "node src/scripts/migrate-unit-codes.js",
     "import:backup": "node src/scripts/import-backup.js"
   },
   "dependencies": {

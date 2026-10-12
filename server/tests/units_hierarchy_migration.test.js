@@ -4,15 +4,17 @@ const mongoose = require('mongoose');
 const { setupTestDb, teardownTestDb } = require('./testHelper');
 const { Unit, Profile, UserUnit, InventoryItem } = require('../src/models');
 const migrateUnits = require('../src/scripts/migrate-units-horana');
+const migrateUnitLocations = require('../src/scripts/migrate-unit-locations');
+const migrateUnitCodes = require('../src/scripts/migrate-unit-codes');
 const db = require('../src/services/db');
 
 const WPS_II_ID = '11111111-1111-1111-1111-111111111003';
 const HORANA_ID = '11111111-1111-1111-1111-111111111140';
 
 const EXPECTED_REPARENTED_CODES = [
-  'HOR-AREA-JAPURA',
-  'HOR-COMMERCIAL',
-  'HOR-CONSTRUCTION',
+  'WPS-AREA-JAPURA',
+  'WPS-COMMERCIAL',
+  'WPS-CONSTRUCTION',
   'CSC-HOKANDARA',
   'CSC-HOMAGAMA',
   'CSC-MALAMBE',
@@ -20,9 +22,9 @@ const EXPECTED_REPARENTED_CODES = [
   'CSC-THALANGAMA',
   'CSC-WALIWITA',
   'DD3-METER-LAB',
-  'HOR-DM-EM',
-  'HOR-HRO',
-  'HOR-ITO'
+  'WPS-DM-EM',
+  'WPS-HRO',
+  'WPS-ITO'
 ];
 
 const EXPECTED_HORANA_CHILD_CODES = [
@@ -122,7 +124,7 @@ test.describe('Organizational Unit Hierarchy & Migration Tests', () => {
     assert.ok(userUnitsHomagama.length > 0, 'Staff assigned to Homagama must remain assigned');
 
     // ITO Unit
-    const ito = await Unit.findOne({ unit_code: 'HOR-ITO' });
+    const ito = await Unit.findOne({ unit_code: 'WPS-ITO' });
     assert.ok(ito);
     assert.equal(ito.id, '11111111-1111-1111-1111-111111111153');
     assert.equal(ito.parent_unit_id, WPS_II_ID);
@@ -237,4 +239,136 @@ test.describe('Organizational Unit Hierarchy & Migration Tests', () => {
     assert.equal(res2.planningUpdated, false);
     assert.equal(res2.lastChildName, 'PLANNING');
   });
+
+  test('7. The 6 moved units have updated WPS-II location text in seed', async () => {
+    const expectedLocations = {
+      'WPS-AREA-JAPURA': 'Japura Operations Sub-Office, WPS-II',
+      'WPS-COMMERCIAL': 'Commercial Operations Branch, WPS-II',
+      'WPS-CONSTRUCTION': 'Construction Branch, WPS-II',
+      'DD3-METER-LAB': 'DD3 Meter Testing Laboratory, WPS-II',
+      'WPS-HRO': 'Human Resources Operations Office, WPS-II',
+      'WPS-ITO': 'Information Technology Operations Office, WPS-II'
+    };
+
+    for (const [code, expectedLoc] of Object.entries(expectedLocations)) {
+      const unit = await Unit.findOne({ unit_code: code });
+      assert.ok(unit, `Unit ${code} must exist in database`);
+      assert.equal(unit.location, expectedLoc, `Unit ${code} location must be "${expectedLoc}"`);
+    }
+
+    // Verify untouched units maintain their correct location
+    const amuHorana = await Unit.findOne({ unit_code: 'AMU-HORANA' });
+    assert.equal(amuHorana.location, 'Area Maintenance Unit, Horana');
+
+    const homagama = await Unit.findOne({ unit_code: 'CSC-HOMAGAMA' });
+    assert.equal(homagama.location, 'Customer Service Center, Homagama');
+
+    const dmEm = await Unit.findOne({ unit_code: 'WPS-DM-EM' });
+    assert.equal(dmEm.location, 'District Maintenance & Electrical Mechanical Office');
+  });
+
+  test('8. migrateUnitLocations script runs idempotently without side-effects', async () => {
+    // 1. Fresh seed should already be up to date
+    const res1 = await migrateUnitLocations({ disconnect: false });
+    assert.equal(res1.updatedCount, 0, 'Should update 0 units when already up to date');
+    assert.equal(res1.upToDateCount, 6, 'All 6 units should already be up to date');
+    assert.equal(res1.notFoundCount, 0);
+
+    // 2. Simulate old state with "..., Horana"
+    const oldLocations = {
+      'WPS-AREA-JAPURA': 'Japura Operations Sub-Office, Horana',
+      'WPS-COMMERCIAL': 'Commercial Operations Branch, Horana',
+      'WPS-CONSTRUCTION': 'Construction Branch, Horana',
+      'DD3-METER-LAB': 'DD3 Meter Testing Laboratory, Horana',
+      'WPS-HRO': 'Human Resources Operations Office, Horana',
+      'WPS-ITO': 'Information Technology Operations Office, Horana'
+    };
+
+    for (const [code, oldLoc] of Object.entries(oldLocations)) {
+      await Unit.updateOne({ unit_code: code }, { $set: { location: oldLoc } });
+    }
+
+    // Run migration
+    const res2 = await migrateUnitLocations({ disconnect: false });
+    assert.equal(res2.updatedCount, 6, 'Should update all 6 units');
+    assert.equal(res2.upToDateCount, 0);
+    assert.equal(res2.notFoundCount, 0);
+
+    // Verify all 6 units have the new WPS-II text
+    for (const code of Object.keys(oldLocations)) {
+      const unit = await Unit.findOne({ unit_code: code });
+      assert.ok(unit.location.endsWith(', WPS-II'), `${code} location should end with ", WPS-II"`);
+    }
+
+    // Untouched units remain unchanged
+    const amuHorana = await Unit.findOne({ unit_code: 'AMU-HORANA' });
+    assert.equal(amuHorana.location, 'Area Maintenance Unit, Horana');
+
+    // 3. Run migration again (idempotency check)
+    const res3 = await migrateUnitLocations({ disconnect: false });
+    assert.equal(res3.updatedCount, 0, 'Second run should update 0 units');
+    assert.equal(res3.upToDateCount, 6, 'Second run should find all 6 up to date');
+    assert.equal(res3.notFoundCount, 0);
+  });
+
+  test('9. migrateUnitCodes script runs idempotently and renames 6 units to WPS- prefix', async () => {
+    // 1. Fresh seed should already have WPS- codes
+    const res1 = await migrateUnitCodes({ disconnect: false });
+    assert.equal(res1.updatedCount, 0, 'Should update 0 units when already up to date');
+    assert.equal(res1.upToDateCount, 6, 'All 6 units should already be up to date');
+    assert.equal(res1.notFoundCount, 0);
+
+    // 2. Simulate old state with HOR- prefix
+    const oldCodes = [
+      { id: '11111111-1111-1111-1111-111111111141', code: 'HOR-AREA-JAPURA' },
+      { id: '11111111-1111-1111-1111-111111111142', code: 'HOR-COMMERCIAL' },
+      { id: '11111111-1111-1111-1111-111111111143', code: 'HOR-CONSTRUCTION' },
+      { id: '11111111-1111-1111-1111-111111111151', code: 'HOR-DM-EM' },
+      { id: '11111111-1111-1111-1111-111111111152', code: 'HOR-HRO' },
+      { id: '11111111-1111-1111-1111-111111111153', code: 'HOR-ITO' }
+    ];
+
+    for (const item of oldCodes) {
+      await Unit.updateOne({ id: item.id }, { $set: { unit_code: item.code } });
+    }
+
+    // Run migration
+    const res2 = await migrateUnitCodes({ disconnect: false });
+    assert.equal(res2.updatedCount, 6, 'Should update all 6 units from HOR- to WPS-');
+    assert.equal(res2.upToDateCount, 0);
+    assert.equal(res2.notFoundCount, 0);
+
+    // Verify all 6 units now have WPS- prefix and preserved IDs
+    const expectedNewCodes = {
+      '11111111-1111-1111-1111-111111111141': 'WPS-AREA-JAPURA',
+      '11111111-1111-1111-1111-111111111142': 'WPS-COMMERCIAL',
+      '11111111-1111-1111-1111-111111111143': 'WPS-CONSTRUCTION',
+      '11111111-1111-1111-1111-111111111151': 'WPS-DM-EM',
+      '11111111-1111-1111-1111-111111111152': 'WPS-HRO',
+      '11111111-1111-1111-1111-111111111153': 'WPS-ITO'
+    };
+
+    for (const [id, expectedCode] of Object.entries(expectedNewCodes)) {
+      const u = await Unit.findOne({ id });
+      assert.ok(u);
+      assert.equal(u.unit_code, expectedCode);
+    }
+
+    // Untouched units remain unchanged
+    const amu = await Unit.findOne({ unit_code: 'AMU-HORANA' });
+    assert.ok(amu, 'AMU-HORANA must remain unchanged');
+
+    const horanaArea = await Unit.findOne({ unit_code: 'AREA-HORANA' });
+    assert.ok(horanaArea, 'AREA-HORANA must remain unchanged');
+
+    const meterLab = await Unit.findOne({ unit_code: 'DD3-METER-LAB' });
+    assert.ok(meterLab, 'DD3-METER-LAB must remain unchanged');
+
+    // 3. Second run immediately (idempotency check)
+    const res3 = await migrateUnitCodes({ disconnect: false });
+    assert.equal(res3.updatedCount, 0, 'Second run should update 0 units');
+    assert.equal(res3.upToDateCount, 6, 'Second run should find all 6 up to date');
+    assert.equal(res3.notFoundCount, 0);
+  });
 });
+

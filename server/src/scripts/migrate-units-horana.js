@@ -7,19 +7,19 @@ const HORANA_ID = '11111111-1111-1111-1111-111111111140';
 
 // 13 units to be placed directly under WPS-II
 const unitsToReparent = [
-  { unit_name: 'AREA JAPURA', unit_code: 'HOR-AREA-JAPURA', unit_type: 'unit', location: 'Japura Operations Sub-Office, Horana', defaultId: '11111111-1111-1111-1111-111111111141' },
-  { unit_name: 'COMMERCIAL', unit_code: 'HOR-COMMERCIAL', unit_type: 'unit', location: 'Commercial Operations Branch, Horana', defaultId: '11111111-1111-1111-1111-111111111142' },
-  { unit_name: 'CONSTRUCTION', unit_code: 'HOR-CONSTRUCTION', unit_type: 'unit', location: 'Construction Branch, Horana', defaultId: '11111111-1111-1111-1111-111111111143' },
+  { unit_name: 'AREA JAPURA', unit_code: 'WPS-AREA-JAPURA', old_unit_code: 'HOR-AREA-JAPURA', unit_type: 'unit', location: 'Japura Operations Sub-Office, WPS-II', defaultId: '11111111-1111-1111-1111-111111111141' },
+  { unit_name: 'COMMERCIAL', unit_code: 'WPS-COMMERCIAL', old_unit_code: 'HOR-COMMERCIAL', unit_type: 'unit', location: 'Commercial Operations Branch, WPS-II', defaultId: '11111111-1111-1111-1111-111111111142' },
+  { unit_name: 'CONSTRUCTION', unit_code: 'WPS-CONSTRUCTION', old_unit_code: 'HOR-CONSTRUCTION', unit_type: 'unit', location: 'Construction Branch, WPS-II', defaultId: '11111111-1111-1111-1111-111111111143' },
   { unit_name: 'CSC_HOKANDARA', unit_code: 'CSC-HOKANDARA', unit_type: 'csc', location: 'Customer Service Center, Hokandara', defaultId: '11111111-1111-1111-1111-111111111144' },
   { unit_name: 'CSC_HOMAGAMA', unit_code: 'CSC-HOMAGAMA', unit_type: 'csc', location: 'Customer Service Center, Homagama', defaultId: '11111111-1111-1111-1111-111111111145' },
   { unit_name: 'CSC_MALAMBE', unit_code: 'CSC-MALAMBE', unit_type: 'csc', location: 'Customer Service Center, Malambe', defaultId: '11111111-1111-1111-1111-111111111146' },
   { unit_name: 'CSC_PANNIPITIYA', unit_code: 'CSC-PANNIPITIYA', unit_type: 'csc', location: 'Customer Service Center, Pannipitiya', defaultId: '11111111-1111-1111-1111-111111111147' },
   { unit_name: 'CSC_THALANGAMA', unit_code: 'CSC-THALANGAMA', unit_type: 'csc', location: 'Customer Service Center, Thalangama', defaultId: '11111111-1111-1111-1111-111111111148' },
   { unit_name: 'CSC_WALIWITA', unit_code: 'CSC-WALIWITA', unit_type: 'csc', location: 'Customer Service Center, Waliwita', defaultId: '11111111-1111-1111-1111-111111111149' },
-  { unit_name: 'DD3_METER LAB', unit_code: 'DD3-METER-LAB', unit_type: 'unit', location: 'DD3 Meter Testing Laboratory, Horana', defaultId: '11111111-1111-1111-1111-111111111150' },
-  { unit_name: 'DM & EM Office', unit_code: 'HOR-DM-EM', unit_type: 'unit', location: 'District Maintenance & Electrical Mechanical Office', defaultId: '11111111-1111-1111-1111-111111111151' },
-  { unit_name: 'HRO', unit_code: 'HOR-HRO', unit_type: 'unit', location: 'Human Resources Operations Office, Horana', defaultId: '11111111-1111-1111-1111-111111111152' },
-  { unit_name: 'ITO', unit_code: 'HOR-ITO', unit_type: 'unit', location: 'Information Technology Operations Office, Horana', defaultId: '11111111-1111-1111-1111-111111111153' }
+  { unit_name: 'DD3_METER LAB', unit_code: 'DD3-METER-LAB', unit_type: 'unit', location: 'DD3 Meter Testing Laboratory, WPS-II', defaultId: '11111111-1111-1111-1111-111111111150' },
+  { unit_name: 'DM & EM Office', unit_code: 'WPS-DM-EM', old_unit_code: 'HOR-DM-EM', unit_type: 'unit', location: 'District Maintenance & Electrical Mechanical Office', defaultId: '11111111-1111-1111-1111-111111111151' },
+  { unit_name: 'HRO', unit_code: 'WPS-HRO', old_unit_code: 'HOR-HRO', unit_type: 'unit', location: 'Human Resources Operations Office, WPS-II', defaultId: '11111111-1111-1111-1111-111111111152' },
+  { unit_name: 'ITO', unit_code: 'WPS-ITO', old_unit_code: 'HOR-ITO', unit_type: 'unit', location: 'Information Technology Operations Office, WPS-II', defaultId: '11111111-1111-1111-1111-111111111153' }
 ];
 
 // 5 new locations under AREA HORANA
@@ -73,7 +73,13 @@ async function migrateUnits(options = {}) {
   // Change 2: Re-parent 13 units directly under WPS-II
   console.log(`--- Applying Change 2: 13 Units under WPS-II (${wps2.unit_name}) ---`);
   for (const item of unitsToReparent) {
-    const existing = await Unit.findOne({ unit_code: item.unit_code });
+    const existing = await Unit.findOne({
+      $or: [
+        { id: item.defaultId },
+        { unit_code: item.unit_code },
+        ...(item.old_unit_code ? [{ unit_code: item.old_unit_code }] : [])
+      ]
+    });
     if (existing) {
       if (existing.parent_unit_id === wps2Id) {
         console.log(`  ✓ [UP TO DATE] ${existing.unit_name} (${existing.unit_code}) already under WPS-II`);

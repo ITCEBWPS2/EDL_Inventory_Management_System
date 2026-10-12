@@ -637,18 +637,15 @@ export const UserManagementPage = () => {
 
             {/* Selected unit feedback banner */}
             {selectedUnit ? (
-              <div className="mb-2 p-2.5 bg-[#2F7A5C]/10 border border-[#2F7A5C]/30 rounded-lg flex items-center justify-between">
+              <div
+                className="mb-2 px-3 py-2 bg-[#2F7A5C]/10 border border-[#2F7A5C]/30 rounded-lg flex items-center justify-between gap-2"
+                title={`${selectedUnit.unit_code} • ${selectedUnit.unit_type?.toUpperCase() || ''}${selectedUnit.location ? ` • ${selectedUnit.location}` : ''}`}
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <CheckCircle2 className="w-4 h-4 text-[#2F7A5C] shrink-0" />
-                  <div className="min-w-0">
-                    <span className="text-[11px] font-semibold text-ink truncate block">
-                      {selectedUnit.unit_name}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate">
-                      {selectedUnit.unit_code} • {selectedUnit.unit_type.toUpperCase()}
-                      {selectedUnit.location ? ` • ${selectedUnit.location}` : ''}
-                    </span>
-                  </div>
+                  <span className="text-xs font-semibold text-ink truncate">
+                    {selectedUnit.unit_name}
+                  </span>
                 </div>
                 <span className="text-[10px] font-medium text-[#2F7A5C] bg-[#2F7A5C]/15 px-2 py-0.5 rounded shrink-0">
                   Assigned Unit

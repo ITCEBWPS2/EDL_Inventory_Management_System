@@ -65,7 +65,7 @@ async function testSerialNumberGenerator() {
   );
 
   const pcSerial = generateSerialNumber({
-    unit: { unit_name: 'ITO', unit_code: 'HOR-ITO' },
+    unit: { unit_name: 'ITO', unit_code: 'WPS-ITO' },
     category: 'IT & Computing Equipment',
     subCategory: 'computers-peripherals',
     itemType: 'Desktop Computer',
