@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { sortUnitChildren, buildUnitTree } from '../../utils/unitTree';
 import { 
   X, Search, Globe, Building2, MapPin, Warehouse, 
   ChevronDown, ChevronRight, CheckCircle2 
@@ -126,32 +127,15 @@ export const LocationSwitcherModal = ({ isOpen, onClose }) => {
     api.get('/units/tree')
       .then(res => {
         if (isMounted && res.success && Array.isArray(res.data)) {
-          setUnitTree(res.data);
+          setUnitTree(sortUnitChildren(res.data));
         } else if (isMounted && systemUnits && systemUnits.length > 0) {
-          // Fallback recursive builder from systemUnits
-          const buildSubTree = (parentId = null) => {
-            return systemUnits
-              .filter(u => u.parent_unit_id === parentId)
-              .map(u => ({
-                ...u,
-                children: buildSubTree(u.id)
-              }));
-          };
-          setUnitTree(buildSubTree(null));
+          setUnitTree(buildUnitTree(systemUnits));
         }
       })
       .catch(err => {
         console.warn('Failed to load unit tree from API, fallback to flat list:', err);
         if (isMounted && systemUnits && systemUnits.length > 0) {
-          const buildSubTree = (parentId = null) => {
-            return systemUnits
-              .filter(u => u.parent_unit_id === parentId)
-              .map(u => ({
-                ...u,
-                children: buildSubTree(u.id)
-              }));
-          };
-          setUnitTree(buildSubTree(null));
+          setUnitTree(buildUnitTree(systemUnits));
         }
       })
       .finally(() => {

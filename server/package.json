@@ -8,6 +8,8 @@
     "start": "node src/server.js",
     "test": "node --test tests/**/*.test.js",
     "seed": "node src/scripts/seed.js",
+    "migrate:units": "node src/scripts/migrate-units-horana.js",
+    "migrate:unit-order": "node src/scripts/migrate-unit-order.js",
     "import:backup": "node src/scripts/import-backup.js"
   },
   "dependencies": {

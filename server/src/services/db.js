@@ -208,6 +208,16 @@ const db = {
     return stripped;
   },
 
+  async getProfileByEmail(email) {
+    if (!email) return null;
+    const norm = String(email).trim().toLowerCase();
+    const doc = await Profile.findOne({ email: norm }).lean();
+    if (!doc) return null;
+    const stripped = stripMongo(doc);
+    stripped.passwordHash = stripped.password_hash;
+    return stripped;
+  },
+
   async getAllProfiles() {
     const docs = await Profile.find({}).lean();
     return docs.map(d => {
@@ -244,7 +254,7 @@ const db = {
       id: profileData.id || uuidv4(),
       username: profileData.username,
       full_name: profileData.full_name,
-      email: profileData.email || `${profileData.username}@edl.lk`,
+      email: profileData.email ? String(profileData.email).trim().toLowerCase() : undefined,
       role: finalRole,
       permission_level: finalPermission,
       contact_info: profileData.contact_info || '',
@@ -274,6 +284,10 @@ const db = {
       delete sanitizedUpdates.password;
     }
 
+    if (sanitizedUpdates.email !== undefined) {
+      sanitizedUpdates.email = sanitizedUpdates.email ? String(sanitizedUpdates.email).trim().toLowerCase() : sanitizedUpdates.email;
+    }
+
     const updated = await Profile.findOneAndUpdate(
       { id },
       { $set: sanitizedUpdates },
@@ -284,6 +298,16 @@ const db = {
     const result = stripMongo(updated);
     result.passwordHash = result.password_hash;
     return result;
+  },
+
+  async countSuperAdmins() {
+    return await Profile.countDocuments({ role: 'super_admin' });
+  },
+
+  async deleteProfile(id) {
+    await UserUnit.deleteMany({ user_id: id });
+    const res = await Profile.deleteOne({ id });
+    return res.deletedCount > 0;
   },
 
   // --- Units & User Units ---
@@ -297,6 +321,22 @@ const db = {
     return stripMongo(doc);
   },
 
+  async getDescendantUnitIds(unitId) {
+    if (!unitId) return [];
+    const allUnits = await Unit.find({}).lean();
+    const ids = [unitId];
+    const collect = (pId) => {
+      for (const u of allUnits) {
+        if (u.parent_unit_id === pId) {
+          ids.push(u.id);
+          collect(u.id);
+        }
+      }
+    };
+    collect(unitId);
+    return ids;
+  },
+
   async createUnit(unitData) {
     const newUnit = {
       id: unitData.id || uuidv4(),
@@ -305,7 +345,8 @@ const db = {
       unit_type: unitData.unit_type,
       parent_unit_id: unitData.parent_unit_id || null,
       location: unitData.location || '',
-      status: unitData.status || 'active'
+      status: unitData.status || 'active',
+      sort_order: Number(unitData.sort_order || 0)
     };
     const created = await Unit.create(newUnit);
     return stripMongo(created.toObject());
@@ -1097,7 +1138,7 @@ const db = {
 
   // --- Issued / Destroyed Items ---
   async getIssuedDestroyedItems(unitIds = null) {
-    const list = await IssuedDestroyedItem.find({}).lean();
+    const list = await IssuedDestroyedItem.find({}).sort({ date: -1, created_at: -1 }).lean();
     const [allItems, allUnits] = await Promise.all([
       InventoryItem.find({}).lean(),
       Unit.find({}).lean()
@@ -1107,23 +1148,55 @@ const db = {
 
     return list.map(entry => {
       const item = itemsMap.get(entry.item_id) || {};
-      const unit = unitsMap.get(item.unit_id) || {};
+      const unitId = entry.unit_id || item.unit_id;
+      const unit = unitsMap.get(unitId) || {};
       const clean = stripMongo(entry);
       return {
         ...clean,
+        serial_number: entry.serial_number || item.serial_number || item.item_code || '',
         item_name: item.item_name || 'Unknown Item',
         item_code: item.item_code || '',
         category: item.category || '',
-        unit_id: item.unit_id,
+        unit_id: unitId,
         unit_name: unit.unit_name || ''
       };
     }).filter(e => !unitIds || unitIds.includes(e.unit_id));
   },
 
+  async getIssuedDestroyedItemById(id) {
+    const entry = await IssuedDestroyedItem.findOne({ id }).lean();
+    if (!entry) return null;
+
+    const [item, allUnits] = await Promise.all([
+      InventoryItem.findOne({ id: entry.item_id }).lean(),
+      Unit.find({}).lean()
+    ]);
+    const unitsMap = new Map(allUnits.map(u => [u.id, u]));
+    const unitId = entry.unit_id || (item ? item.unit_id : null);
+    const unit = unitsMap.get(unitId) || {};
+    const clean = stripMongo(entry);
+
+    return {
+      ...clean,
+      serial_number: entry.serial_number || (item ? (item.serial_number || item.item_code) : '') || '',
+      item_name: item ? (item.item_name || 'Unknown Item') : 'Unknown Item',
+      item_code: item ? (item.item_code || '') : '',
+      category: item ? (item.category || '') : '',
+      unit_id: unitId,
+      unit_name: unit.unit_name || ''
+    };
+  },
+
   async createIssuedDestroyedItem(data) {
+    const item = await InventoryItem.findOne({ id: data.item_id });
+    const unitId = data.unit_id || (item ? item.unit_id : null);
+    const serialNo = data.serial_number || (item ? (item.serial_number || item.item_code) : null);
+
     const newItem = {
       id: data.id || uuidv4(),
       item_id: data.item_id,
+      unit_id: unitId,
+      serial_number: serialNo,
       quantity: Number(data.quantity),
       disposition: data.disposition,
       reason: data.reason || '',
@@ -1134,13 +1207,74 @@ const db = {
     const created = await IssuedDestroyedItem.create(newItem);
 
     // Deduct quantity from inventory item
-    const item = await InventoryItem.findOne({ id: data.item_id });
     if (item) {
       item.quantity = Math.max(0, Number(item.quantity) - Number(data.quantity));
       await item.save();
     }
 
-    return stripMongo(created.toObject());
+    return await db.getIssuedDestroyedItemById(created.id);
+  },
+
+  async updateIssuedDestroyedItem(id, updates) {
+    const existing = await IssuedDestroyedItem.findOne({ id });
+    if (!existing) return null;
+
+    const oldItemId = existing.item_id;
+    const oldQty = Number(existing.quantity);
+    const newItemId = updates.item_id || oldItemId;
+    const newQty = updates.quantity !== undefined ? Number(updates.quantity) : oldQty;
+
+    if (newItemId === oldItemId) {
+      const qtyDiff = newQty - oldQty;
+      if (qtyDiff !== 0) {
+        const item = await InventoryItem.findOne({ id: oldItemId });
+        if (item) {
+          item.quantity = Math.max(0, Number(item.quantity) - qtyDiff);
+          await item.save();
+        }
+      }
+    } else {
+      // Revert old item quantity
+      const oldItem = await InventoryItem.findOne({ id: oldItemId });
+      if (oldItem) {
+        oldItem.quantity = Number(oldItem.quantity) + oldQty;
+        await oldItem.save();
+      }
+      // Deduct from new item
+      const newItem = await InventoryItem.findOne({ id: newItemId });
+      if (newItem) {
+        newItem.quantity = Math.max(0, Number(newItem.quantity) - newQty);
+        await newItem.save();
+        if (!updates.unit_id) updates.unit_id = newItem.unit_id;
+      }
+    }
+
+    if (updates.item_id) existing.item_id = updates.item_id;
+    if (updates.unit_id !== undefined) existing.unit_id = updates.unit_id;
+    if (updates.serial_number !== undefined) existing.serial_number = updates.serial_number;
+    if (updates.quantity !== undefined) existing.quantity = Number(updates.quantity);
+    if (updates.disposition) existing.disposition = updates.disposition;
+    if (updates.reason !== undefined) existing.reason = updates.reason;
+    if (updates.date) existing.date = updates.date;
+    if (updates.verification_id !== undefined) existing.verification_id = updates.verification_id;
+
+    await existing.save();
+    return await db.getIssuedDestroyedItemById(id);
+  },
+
+  async deleteIssuedDestroyedItem(id) {
+    const existing = await IssuedDestroyedItem.findOne({ id });
+    if (!existing) return false;
+
+    // Restore inventory item quantity
+    const item = await InventoryItem.findOne({ id: existing.item_id });
+    if (item) {
+      item.quantity = Number(item.quantity || 0) + Number(existing.quantity || 0);
+      await item.save();
+    }
+
+    const res = await IssuedDestroyedItem.deleteOne({ id });
+    return res.deletedCount > 0;
   }
 };
 

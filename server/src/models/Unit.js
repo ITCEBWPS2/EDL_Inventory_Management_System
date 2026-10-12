@@ -35,6 +35,10 @@ const UnitSchema = new mongoose.Schema(
     status: {
       type: String,
       default: 'active'
+    },
+    sort_order: {
+      type: Number,
+      default: 0
     }
   },
   {

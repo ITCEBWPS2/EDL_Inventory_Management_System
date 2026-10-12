@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search, ChevronDown, ChevronRight, MapPin, Building2, Warehouse, Globe, Lock } from 'lucide-react';
+import { sortUnitChildren } from '../../utils/unitTree';
 
 const UnitTreeNode = ({
   node,
@@ -87,17 +88,6 @@ const UnitTreeNode = ({
         <span className={`truncate flex-1 ${level <= 2 ? 'font-semibold' : 'font-normal'}`}>
           {node.unit_name}
         </span>
-
-        {/* Unit Code Badge */}
-        <span
-          className={`text-[10px] font-mono shrink-0 ml-1.5 px-1 py-0.5 rounded ${
-            isSelected
-              ? 'bg-white/20 text-white'
-              : 'text-slate bg-surface border border-line/60'
-          }`}
-        >
-          {node.unit_code}
-        </span>
       </div>
 
       {/* Child Nodes */}
@@ -132,6 +122,8 @@ export const UnitTreeSearch = ({
 }) => {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState({});
+
+  const sortedUnitTree = useMemo(() => sortUnitChildren(unitTree), [unitTree]);
 
   const toggleExpand = (id) => {
     setExpanded(prev => ({
@@ -179,7 +171,7 @@ export const UnitTreeSearch = ({
 
       {/* Tree Content */}
       <div className="space-y-1 overflow-y-auto max-h-[380px] pr-1">
-        {unitTree.map(rootNode => (
+        {sortedUnitTree.map(rootNode => (
           <UnitTreeNode
             key={rootNode.id}
             node={rootNode}
@@ -194,7 +186,7 @@ export const UnitTreeSearch = ({
           />
         ))}
 
-        {unitTree.length === 0 && (
+        {sortedUnitTree.length === 0 && (
           <div className="text-center py-6 text-slate text-xs">No unit hierarchy available.</div>
         )}
       </div>

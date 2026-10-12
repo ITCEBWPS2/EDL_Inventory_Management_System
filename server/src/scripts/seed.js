@@ -29,7 +29,6 @@ const units = [
   { id: '11111111-1111-1111-1111-111111111120', unit_name: 'AREA BANDARAGAMA', unit_code: 'AREA-BANDARAGAMA', unit_type: 'area', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Bandaragama Area Office', status: 'active' },
   { id: '11111111-1111-1111-1111-111111111130', unit_name: 'AREA HOMAGAMA', unit_code: 'AREA-HOMAGAMA', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Homagama Area Operations Office', status: 'active' },
   { id: '11111111-1111-1111-1111-111111111140', unit_name: 'AREA HORANA', unit_code: 'AREA-HORANA', unit_type: 'area', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Horana Area Office', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111160', unit_name: 'PLANNING', unit_code: 'PLANNING-WPS-II', unit_type: 'area', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Planning Branch, WPS-II Complex', status: 'active' },
 
   // Children under AREA AVISSAWELLA
   { id: '11111111-1111-1111-1111-111111111111', unit_name: 'AMU-Avissawella', unit_code: 'AMU-AVISSAWELLA', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111110', location: 'Area Maintenance Unit, Avissawella', status: 'active' },
@@ -41,20 +40,28 @@ const units = [
   { id: '11111111-1111-1111-1111-111111111121', unit_name: 'CSC BANDARAGAMA', unit_code: 'CSC-BANDARAGAMA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111120', location: 'Customer Service Center, Bandaragama', status: 'active' },
   { id: '11111111-1111-1111-1111-111111111122', unit_name: 'CSC MILLENIYA', unit_code: 'CSC-MILLENIYA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111120', location: 'Customer Service Center, Milleniya', status: 'active' },
 
-  // Children under AREA HORANA
-  { id: '11111111-1111-1111-1111-111111111141', unit_name: 'AREA JAPURA', unit_code: 'HOR-AREA-JAPURA', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Japura Operations Sub-Office, Horana', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111142', unit_name: 'COMMERCIAL', unit_code: 'HOR-COMMERCIAL', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Commercial Operations Branch, Horana', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111143', unit_name: 'CONSTRUCTION', unit_code: 'HOR-CONSTRUCTION', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Construction Branch, Horana', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111144', unit_name: 'CSC_HOKANDARA', unit_code: 'CSC-HOKANDARA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Hokandara', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111145', unit_name: 'CSC_HOMAGAMA', unit_code: 'CSC-HOMAGAMA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Homagama', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111146', unit_name: 'CSC_MALAMBE', unit_code: 'CSC-MALAMBE', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Malambe', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111147', unit_name: 'CSC_PANNIPITIYA', unit_code: 'CSC-PANNIPITIYA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Pannipitiya', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111148', unit_name: 'CSC_THALANGAMA', unit_code: 'CSC-THALANGAMA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Thalangama', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111149', unit_name: 'CSC_WALIWITA', unit_code: 'CSC-WALIWITA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Waliwita', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111150', unit_name: 'DD3_METER LAB', unit_code: 'DD3-METER-LAB', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'DD3 Meter Testing Laboratory, Horana', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111151', unit_name: 'DM & EM Office', unit_code: 'HOR-DM-EM', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'District Maintenance & Electrical Mechanical Office', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111152', unit_name: 'HRO', unit_code: 'HOR-HRO', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Human Resources Operations Office, Horana', status: 'active' },
-  { id: '11111111-1111-1111-1111-111111111153', unit_name: 'ITO', unit_code: 'HOR-ITO', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Information Technology Operations Office, Horana', status: 'active' },
+  // Direct units & sub-areas under WPS-II (including 13 re-parented units)
+  { id: '11111111-1111-1111-1111-111111111141', unit_name: 'AREA JAPURA', unit_code: 'HOR-AREA-JAPURA', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Japura Operations Sub-Office, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111142', unit_name: 'COMMERCIAL', unit_code: 'HOR-COMMERCIAL', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Commercial Operations Branch, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111143', unit_name: 'CONSTRUCTION', unit_code: 'HOR-CONSTRUCTION', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Construction Branch, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111144', unit_name: 'CSC_HOKANDARA', unit_code: 'CSC-HOKANDARA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Hokandara', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111145', unit_name: 'CSC_HOMAGAMA', unit_code: 'CSC-HOMAGAMA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Homagama', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111146', unit_name: 'CSC_MALAMBE', unit_code: 'CSC-MALAMBE', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Malambe', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111147', unit_name: 'CSC_PANNIPITIYA', unit_code: 'CSC-PANNIPITIYA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Pannipitiya', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111148', unit_name: 'CSC_THALANGAMA', unit_code: 'CSC-THALANGAMA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Thalangama', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111149', unit_name: 'CSC_WALIWITA', unit_code: 'CSC-WALIWITA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Customer Service Center, Waliwita', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111150', unit_name: 'DD3_METER LAB', unit_code: 'DD3-METER-LAB', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'DD3 Meter Testing Laboratory, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111151', unit_name: 'DM & EM Office', unit_code: 'HOR-DM-EM', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'District Maintenance & Electrical Mechanical Office', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111152', unit_name: 'HRO', unit_code: 'HOR-HRO', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Human Resources Operations Office, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111153', unit_name: 'ITO', unit_code: 'HOR-ITO', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Information Technology Operations Office, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111160', unit_name: 'PLANNING', unit_code: 'PLANNING-WPS-II', unit_type: 'area', parent_unit_id: '11111111-1111-1111-1111-111111111003', location: 'Planning Branch, WPS-II Complex', status: 'active', sort_order: 999 },
+
+  // Children under AREA HORANA (5 new locations)
+  { id: '11111111-1111-1111-1111-111111111154', unit_name: 'AMU-Horana', unit_code: 'AMU-HORANA', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Area Maintenance Unit, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111155', unit_name: 'CSC BULATHSINHALA', unit_code: 'CSC-BULATHSINHALA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Bulathsinhala', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111156', unit_name: 'CSC HORANA', unit_code: 'CSC-HORANA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Horana', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111157', unit_name: 'CSC INGIRIYA', unit_code: 'CSC-INGIRIYA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Ingiriya', status: 'active' },
+  { id: '11111111-1111-1111-1111-111111111158', unit_name: 'CSC MORAGAHAHENA', unit_code: 'CSC-MORAGAHAHENA', unit_type: 'csc', parent_unit_id: '11111111-1111-1111-1111-111111111140', location: 'Customer Service Center, Moragahahena', status: 'active' },
 
   // Children under PLANNING
   { id: '11111111-1111-1111-1111-111111111161', unit_name: 'CALL CENTER & DCC', unit_code: 'CALL-CENTER-DCC', unit_type: 'unit', parent_unit_id: '11111111-1111-1111-1111-111111111160', location: 'Distribution Control Center & Call Center, WPS-II', status: 'active' }
@@ -98,6 +105,11 @@ const user_units = [
   { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111151' },
   { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111152' },
   { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111153' },
+  { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111154' },
+  { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111155' },
+  { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111156' },
+  { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111157' },
+  { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111158' },
   { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111160' },
   { user_id: '00000000-0000-0000-0000-000000000002', unit_id: '11111111-1111-1111-1111-111111111161' },
   // Unit Head: Homagama CSC

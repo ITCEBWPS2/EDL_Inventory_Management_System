@@ -19,6 +19,8 @@ import { AnnualVerificationOverviewPage } from './pages/AnnualVerificationOvervi
 import { NewVerification } from './pages/NewVerification';
 import { VerificationHistory } from './pages/VerificationHistory';
 import { IssuedDestroyedPage } from './pages/IssuedDestroyedPage';
+import { AddIssuedDestroyedPage } from './pages/AddIssuedDestroyedPage';
+import { EditIssuedDestroyedPage } from './pages/EditIssuedDestroyedPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { UnitManagementPage } from './pages/UnitManagementPage';
@@ -116,6 +118,8 @@ export default function App() {
             <Route path="/verification/new" element={<ProtectedRoute requireWrite={true}><NewVerification /></ProtectedRoute>} />
             <Route path="/verification/history" element={<ProtectedRoute><VerificationHistory /></ProtectedRoute>} />
             <Route path="/verification/issued-destroyed" element={<ProtectedRoute><IssuedDestroyedPage /></ProtectedRoute>} />
+            <Route path="/verification/issued-destroyed/add" element={<ProtectedRoute requireWrite={true}><AddIssuedDestroyedPage /></ProtectedRoute>} />
+            <Route path="/verification/issued-destroyed/:id/edit" element={<ProtectedRoute requireWrite={true}><EditIssuedDestroyedPage /></ProtectedRoute>} />
 
             {/* 4. Reports */}
             <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />

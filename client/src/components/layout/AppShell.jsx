@@ -385,7 +385,7 @@ export const AppShell = ({ children, breadcrumbs = [] }) => {
                 <Link
                   to="/verification/issued-destroyed"
                   className={`block py-1.5 px-2 rounded transition-colors ${
-                    isCurrent('/verification/issued-destroyed') ? 'bg-white/10 text-signal font-medium' : 'text-slate-400 hover:text-white'
+                    location.pathname.startsWith('/verification/issued-destroyed') ? 'bg-white/10 text-signal font-medium' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Issued / Destroyed

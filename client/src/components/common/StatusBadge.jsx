@@ -6,7 +6,13 @@ export const StatusBadge = ({ status, type }) => {
   let bgClass = 'bg-slate/10 text-slate';
   let dotClass = 'bg-slate';
 
-  if (
+  if (norm === 'issued' || norm.startsWith('issue')) {
+    bgClass = 'bg-[#2F7A5C]/10 text-[#2F7A5C] border border-[#2F7A5C]/50';
+    dotClass = 'bg-[#2F7A5C]';
+  } else if (norm === 'destroyed' || norm === 'scrapped' || norm.startsWith('destroy')) {
+    bgClass = 'bg-[#B4483A]/10 text-[#B4483A] border border-[#B4483A]/50';
+    dotClass = 'bg-[#B4483A]';
+  } else if (
     norm.includes('in') ||
     norm.includes('received') ||
     norm.includes('confirmed') ||
@@ -23,12 +29,13 @@ export const StatusBadge = ({ status, type }) => {
     norm.includes('discrepancy') ||
     norm.includes('damaged') ||
     norm.includes('inactive') ||
-    norm.includes('destroyed')
+    norm.includes('written off')
   ) {
     bgClass = 'bg-[#B4483A]/15 text-[#B4483A]';
     dotClass = 'bg-[#B4483A]';
   } else if (
     norm.includes('transfer') ||
+    norm.includes('auction') ||
     norm.includes('progress') ||
     norm.includes('draft') ||
     norm.includes('fair') ||

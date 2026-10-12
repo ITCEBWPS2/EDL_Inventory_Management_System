@@ -9,6 +9,9 @@ router.use(requireAuth);
 // Issued / Destroyed
 router.get('/issued-destroyed', requirePermission(['read_only', 'read_write']), verificationController.getIssuedDestroyed);
 router.post('/issued-destroyed', requirePermission(['read_write']), verificationController.createIssuedDestroyed);
+router.get('/issued-destroyed/:id', requirePermission(['read_only', 'read_write']), verificationController.getIssuedDestroyedById);
+router.put('/issued-destroyed/:id', requirePermission(['read_write']), verificationController.updateIssuedDestroyed);
+router.delete('/issued-destroyed/:id', requirePermission(['read_write']), verificationController.deleteIssuedDestroyed);
 
 // Verifications
 router.get('/history-items', requirePermission(['read_only', 'read_write']), verificationController.getHistoryItems);

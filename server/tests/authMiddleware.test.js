@@ -165,6 +165,7 @@ test('Security & Access Control Enforcement Tests', async (t) => {
     const attemptedProfile = {
       username: 'hacker_self_signup',
       full_name: 'Malicious User',
+      email: 'hacker@edl.lk',
       role: 'super_admin',
       permission_level: 'read_write'
     };
@@ -188,6 +189,7 @@ test('Security & Access Control Enforcement Tests', async (t) => {
     const adminCreatedUser = {
       username: 'legit_admin_created',
       full_name: 'Regional Local Admin',
+      email: 'legit_admin@edl.lk',
       role: 'local_admin',
       permission_level: null
     };

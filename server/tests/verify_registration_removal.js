@@ -61,6 +61,7 @@ const request = (path, method = 'GET', body = null, token = null) => {
     const res = await request('/users', 'POST', {
       username: uname,
       full_name: `Test Employee ${p}`,
+      email: `${uname}@edl.lk`,
       role: 'employee',
       permission_level: p,
       unit_ids: ['11111111-1111-1111-1111-111111111145'],
@@ -77,6 +78,7 @@ const request = (path, method = 'GET', body = null, token = null) => {
   const uhRes = await request('/users', 'POST', {
     username: uhUname,
     full_name: 'Test Unit Head',
+    email: `${uhUname}@edl.lk`,
     role: 'unit_head',
     permission_level: 'read_write', // caller might pass something, must be set to null
     unit_ids: ['11111111-1111-1111-1111-111111111145'],
@@ -96,6 +98,7 @@ const request = (path, method = 'GET', body = null, token = null) => {
   const ladminCreateSadmin = await request('/users', 'POST', {
     username: `illegal_sadmin_${Date.now()}`,
     full_name: 'Illegal Super Admin',
+    email: `illegal_sadmin_${Date.now()}@edl.lk`,
     role: 'super_admin',
     unit_ids: ['11111111-1111-1111-1111-111111111140']
   }, ladminToken);
@@ -106,6 +109,7 @@ const request = (path, method = 'GET', body = null, token = null) => {
   const ladminOutScope = await request('/users', 'POST', {
     username: `out_of_scope_${Date.now()}`,
     full_name: 'Out of Scope User',
+    email: `out_of_scope_${Date.now()}@edl.lk`,
     role: 'employee',
     permission_level: 'read_write',
     unit_ids: ['11111111-1111-1111-1111-111111111001']
@@ -117,6 +121,7 @@ const request = (path, method = 'GET', body = null, token = null) => {
   const ladminInScope = await request('/users', 'POST', {
     username: `in_scope_${Date.now()}`,
     full_name: 'In Scope User',
+    email: `in_scope_${Date.now()}@edl.lk`,
     role: 'employee',
     permission_level: 'read_only',
     unit_ids: ['11111111-1111-1111-1111-111111111145'],

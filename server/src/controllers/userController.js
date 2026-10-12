@@ -1,6 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const db = require('../services/db');
+const { Profile } = require('../models');
+
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 const userController = {
   async getAllUsers(req, res) {
@@ -53,6 +56,29 @@ const userController = {
         return res.status(403).json({
           success: false,
           message: 'Local Admins cannot create Super Admin accounts.'
+        });
+      }
+
+      if (!email || !String(email).trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email address is required.'
+        });
+      }
+
+      const normalizedEmail = String(email).trim().toLowerCase();
+      if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.includes('..')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid email address.'
+        });
+      }
+
+      const existingEmail = await db.getProfileByEmail(normalizedEmail);
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already in use.'
         });
       }
 
@@ -127,7 +153,7 @@ const userController = {
         id: newId,
         username,
         full_name,
-        email: email || `${username}@edl.lk`,
+        email: normalizedEmail,
         role,
         permission_level: assignedPermission,
         contact_info: contact_info || '',
@@ -147,6 +173,14 @@ const userController = {
         }
       });
     } catch (error) {
+      if (error.code === 11000) {
+        if (error.keyPattern?.email || (error.message && error.message.includes('email'))) {
+          return res.status(400).json({ success: false, message: 'Email already in use.' });
+        }
+        if (error.keyPattern?.username || (error.message && error.message.includes('username'))) {
+          return res.status(400).json({ success: false, message: 'Username already in use.' });
+        }
+      }
       console.error('Create user error:', error);
       return res.status(500).json({ success: false, message: 'Failed to create user.' });
     }
@@ -155,7 +189,7 @@ const userController = {
   async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const { full_name, role, permission_level, contact_info, account_status, unit_id, unit_ids } = req.body;
+      const { full_name, email, role, permission_level, contact_info, account_status, unit_id, unit_ids } = req.body;
 
       const profile = await db.getProfileById(id);
       if (!profile) {
@@ -220,6 +254,35 @@ const userController = {
       }
 
       const updates = {};
+      if (email !== undefined) {
+        if (!email || !String(email).trim()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Email address is required.'
+          });
+        }
+        const normalizedEmail = String(email).trim().toLowerCase();
+        if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.includes('..')) {
+          return res.status(400).json({
+            success: false,
+            message: 'Please enter a valid email address.'
+          });
+        }
+        const existingWithEmail = await Profile.findOne({ email: normalizedEmail, id: { $ne: id } }).lean();
+        if (existingWithEmail) {
+          return res.status(400).json({
+            success: false,
+            message: 'Email already in use.'
+          });
+        }
+        updates.email = normalizedEmail;
+      } else if (!profile.email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email address is required.'
+        });
+      }
+
       if (full_name !== undefined) updates.full_name = full_name;
       if (role !== undefined) updates.role = role;
       
@@ -250,6 +313,14 @@ const userController = {
         }
       });
     } catch (error) {
+      if (error.code === 11000) {
+        if (error.keyPattern?.email || (error.message && error.message.includes('email'))) {
+          return res.status(400).json({ success: false, message: 'Email already in use.' });
+        }
+        if (error.keyPattern?.username || (error.message && error.message.includes('username'))) {
+          return res.status(400).json({ success: false, message: 'Username already in use.' });
+        }
+      }
       console.error('Update user error:', error);
       return res.status(500).json({ success: false, message: 'Failed to update user.' });
     }
@@ -280,6 +351,62 @@ const userController = {
     } catch (error) {
       console.error('Toggle status error:', error);
       return res.status(500).json({ success: false, message: 'Failed to update user status.' });
+    }
+  },
+
+  async deleteUser(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Prevent user from deleting their own account
+      if (req.user.id === id) {
+        return res.status(403).json({
+          success: false,
+          message: 'You cannot delete your own account.'
+        });
+      }
+
+      // Check if user exists
+      const profile = await db.getProfileById(id);
+      if (!profile) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found.'
+        });
+      }
+
+      // Local Admin cannot delete Super Admin
+      if (req.user.role === 'local_admin' && profile.role === 'super_admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Local Admins cannot delete Super Admin accounts.'
+        });
+      }
+
+      // Never allow deleting the last remaining Super Admin
+      if (profile.role === 'super_admin') {
+        const superAdminCount = await db.countSuperAdmins();
+        if (superAdminCount <= 1) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot delete the last remaining Super Admin account.'
+          });
+        }
+      }
+
+      // Delete profile and remove user_units assignments in the same operation
+      await db.deleteProfile(id);
+
+      return res.json({
+        success: true,
+        message: 'User deleted successfully.'
+      });
+    } catch (error) {
+      console.error('Delete user error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete user.'
+      });
     }
   }
 };

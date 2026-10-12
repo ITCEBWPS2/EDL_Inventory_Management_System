@@ -231,43 +231,182 @@ const verificationController = {
     }
   },
 
+  async getIssuedDestroyedById(req, res) {
+    try {
+      const { id } = req.params;
+      const record = await db.getIssuedDestroyedItemById(id);
+      if (!record) {
+        return res.status(404).json({ success: false, message: 'Issued / destroyed record not found.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (record.unit_id && !authorized.includes(record.unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this record.' });
+        }
+      }
+
+      return res.json({ success: true, data: record });
+    } catch (error) {
+      console.error('Get issued destroyed by id error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to retrieve record.' });
+    }
+  },
+
   async createIssuedDestroyed(req, res) {
     try {
-      const { item_id, quantity, disposition, reason, date, verification_id } = req.body;
+      const { item_id, serial_number, quantity, disposition, reason, date, verification_id } = req.body;
 
-      if (!item_id || !quantity || !disposition || !reason) {
+      if (!item_id || quantity === undefined || quantity === null || !disposition || !date) {
         return res.status(400).json({
           success: false,
-          message: 'Item, quantity, disposition, and reason are required.'
+          message: 'Item, quantity, disposition, and date are required.'
+        });
+      }
+
+      const numQty = Number(quantity);
+      if (isNaN(numQty) || numQty < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Quantity must be at least 1.'
         });
       }
 
       const item = await db.getInventoryItemById(item_id);
       if (!item) {
-        return res.status(404).json({ success: false, message: 'Item not found.' });
+        return res.status(404).json({ success: false, message: 'Inventory item not found.' });
       }
 
       if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin' && !(req.user.unitIds || []).includes(item.unit_id)) {
-        return res.status(403).json({ success: false, message: 'Access Denied.' });
+        return res.status(403).json({ success: false, message: 'Access Denied for this item\'s unit.' });
+      }
+
+      const availableQty = Number(item.quantity || 0);
+      if (numQty > availableQty) {
+        return res.status(400).json({
+          success: false,
+          message: `Quantity cannot exceed available inventory (${availableQty}).`
+        });
       }
 
       const record = await db.createIssuedDestroyedItem({
         item_id,
-        quantity: Number(quantity),
+        unit_id: item.unit_id,
+        serial_number: serial_number || null,
+        quantity: numQty,
         disposition,
-        reason,
-        date: date || new Date().toISOString().split('T')[0],
+        reason: reason || '',
+        date,
         verification_id: verification_id || null
       });
 
       return res.status(201).json({
         success: true,
-        message: 'Item write-off / issued / destroyed recorded.',
+        message: 'Item write-off / issued / destroyed recorded successfully.',
         data: record
       });
     } catch (error) {
       console.error('Create issued/destroyed error:', error);
       return res.status(500).json({ success: false, message: 'Failed to record write-off.' });
+    }
+  },
+
+  async updateIssuedDestroyed(req, res) {
+    try {
+      const { id } = req.params;
+      const existing = await db.getIssuedDestroyedItemById(id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Issued / destroyed record not found.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (existing.unit_id && !authorized.includes(existing.unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this record.' });
+        }
+      }
+
+      const { item_id, serial_number, quantity, disposition, reason, date, verification_id } = req.body;
+
+      const targetItemId = item_id || existing.item_id;
+      const targetItem = await db.getInventoryItemById(targetItemId);
+      if (!targetItem) {
+        return res.status(404).json({ success: false, message: 'Inventory item not found.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin' && !(req.user.unitIds || []).includes(targetItem.unit_id)) {
+        return res.status(403).json({ success: false, message: 'Access Denied for target item\'s unit.' });
+      }
+
+      const numQty = quantity !== undefined ? Number(quantity) : existing.quantity;
+      if (isNaN(numQty) || numQty < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Quantity must be at least 1.'
+        });
+      }
+
+      // Check max allowable quantity
+      const availableBefore = (existing.item_id === targetItem.id)
+        ? Number(targetItem.quantity || 0) + Number(existing.quantity || 0)
+        : Number(targetItem.quantity || 0);
+
+      if (numQty > availableBefore) {
+        return res.status(400).json({
+          success: false,
+          message: `Quantity cannot exceed available inventory (${availableBefore}).`
+        });
+      }
+
+      const updated = await db.updateIssuedDestroyedItem(id, {
+        item_id: targetItemId,
+        unit_id: targetItem.unit_id,
+        serial_number: serial_number !== undefined ? serial_number : existing.serial_number,
+        quantity: numQty,
+        disposition: disposition || existing.disposition,
+        reason: reason !== undefined ? reason : existing.reason,
+        date: date || existing.date,
+        verification_id: verification_id !== undefined ? verification_id : existing.verification_id
+      });
+
+      return res.json({
+        success: true,
+        message: 'Record updated successfully.',
+        data: updated
+      });
+    } catch (error) {
+      console.error('Update issued destroyed error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to update record.' });
+    }
+  },
+
+  async deleteIssuedDestroyed(req, res) {
+    try {
+      const { id } = req.params;
+      const existing = await db.getIssuedDestroyedItemById(id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Issued / destroyed record not found.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (existing.unit_id && !authorized.includes(existing.unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this record.' });
+        }
+      }
+
+      const deleted = await db.deleteIssuedDestroyedItem(id);
+      if (!deleted) {
+        return res.status(500).json({ success: false, message: 'Failed to delete record.' });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Record deleted successfully.'
+      });
+    } catch (error) {
+      console.error('Delete issued destroyed error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to delete record.' });
     }
   }
 };

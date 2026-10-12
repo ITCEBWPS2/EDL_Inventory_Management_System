@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Filter, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 
 export const DataTable = ({
@@ -7,6 +7,9 @@ export const DataTable = ({
   onAdd = null,
   onEdit = null,
   onDelete = null,
+  deleteTooltip = 'Delete',
+  isRowDeletable = null,
+  hideDisabledDelete = false,
   addLabel = 'Add New',
   filterOptions = [],
   filterKey = null,
@@ -77,7 +80,14 @@ export const DataTable = ({
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / pageSize) || 1;
-  const paginatedData = filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedData = filteredData.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
 
   // Dynamic placeholder based on selected search field
   const activeSearchFieldLabel = searchFieldOptions.find(o => o.value === selectedSearchField)?.label;
@@ -258,15 +268,34 @@ export const DataTable = ({
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            {onDelete && (
-                              <button
-                                onClick={() => onDelete(row)}
-                                title="Delete"
-                                className="p-1.5 rounded hover:bg-[#B4483A]/10 text-slate hover:text-[#B4483A] transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            {onDelete && (() => {
+                              const canDelete = isRowDeletable ? isRowDeletable(row) : true;
+                              if (!canDelete) {
+                                if (hideDisabledDelete) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    aria-disabled="true"
+                                    title="You cannot delete your own account"
+                                    className="p-1.5 rounded text-slate/30 cursor-not-allowed opacity-40"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                );
+                              }
+                              const tooltipText = typeof deleteTooltip === 'function' ? deleteTooltip(row) : deleteTooltip;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => onDelete(row)}
+                                  title={tooltipText || 'Delete'}
+                                  className="p-1.5 rounded hover:bg-[#B4483A]/10 text-[#B4483A] hover:text-[#96382C] transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              );
+                            })()}
                           </div>
                         </td>
                       )}
@@ -294,20 +323,20 @@ export const DataTable = ({
       {/* Pagination Footer */}
       <div className="p-3 border-t border-line flex items-center justify-between text-xs text-slate bg-surface/40">
         <div>
-          Page <span className="font-semibold text-ink tabular-nums">{currentPage}</span> of{' '}
+          Page <span className="font-semibold text-ink tabular-nums">{safeCurrentPage}</span> of{' '}
           <span className="font-semibold text-ink tabular-nums">{totalPages}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
+            disabled={safeCurrentPage === 1}
             className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage >= totalPages}
+            disabled={safeCurrentPage >= totalPages}
             className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ChevronRight className="w-4 h-4" />

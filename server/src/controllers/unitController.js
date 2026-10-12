@@ -35,6 +35,11 @@ const unitController = {
       const buildSubTree = (parentId = null) => {
         return allUnits
           .filter(u => u.parent_unit_id === parentId)
+          .sort((a, b) => {
+            const orderA = a.sort_order !== undefined && a.sort_order !== null ? Number(a.sort_order) : (a.unit_code === 'PLANNING-WPS-II' ? 999 : 0);
+            const orderB = b.sort_order !== undefined && b.sort_order !== null ? Number(b.sort_order) : (b.unit_code === 'PLANNING-WPS-II' ? 999 : 0);
+            return orderA - orderB;
+          })
           .map(u => ({
             ...u,
             children: buildSubTree(u.id)

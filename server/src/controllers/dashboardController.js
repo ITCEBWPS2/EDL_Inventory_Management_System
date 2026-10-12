@@ -4,16 +4,38 @@ const dashboardController = {
   async getDashboardData(req, res) {
     try {
       const { unit_id } = req.query;
+      const allUnits = await db.getUnits();
+
+      const getDescendantUnitIds = (unitId) => {
+        const ids = [unitId];
+        const collect = (pId) => {
+          for (const u of allUnits) {
+            if (u.parent_unit_id === pId) {
+              ids.push(u.id);
+              collect(u.id);
+            }
+          }
+        };
+        collect(unitId);
+        return ids;
+      };
+
       let targetUnits = null;
 
       if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
         const authorized = req.user.unitIds || [];
-        if (unit_id && !authorized.includes(unit_id)) {
-          return res.status(403).json({ success: false, message: 'Access Denied.' });
+        if (unit_id) {
+          const scopedIds = getDescendantUnitIds(unit_id);
+          const allowed = scopedIds.filter(id => authorized.includes(id));
+          if (!authorized.includes(unit_id) && allowed.length === 0) {
+            return res.status(403).json({ success: false, message: 'Access Denied.' });
+          }
+          targetUnits = allowed.length > 0 ? allowed : [unit_id];
+        } else {
+          targetUnits = authorized;
         }
-        targetUnits = unit_id ? [unit_id] : authorized;
       } else if (unit_id) {
-        targetUnits = [unit_id];
+        targetUnits = getDescendantUnitIds(unit_id);
       }
 
       // 1. Fetch relevant datasets
@@ -22,7 +44,6 @@ const dashboardController = {
       const receivedTx = await db.getReceivedTransactions(targetUnits);
       const expendedTx = await db.getExpendedTransactions(targetUnits);
       const verifications = await db.getVerifications(targetUnits);
-      const allUnits = await db.getUnits();
 
       // 2. Compute KPI Metrics
       const totalUniqueItems = items.length;
@@ -79,6 +100,11 @@ const dashboardController = {
       const buildSubTree = (parentId = null) => {
         return allUnits
           .filter(u => u.parent_unit_id === parentId)
+          .sort((a, b) => {
+            const orderA = a.sort_order !== undefined && a.sort_order !== null ? Number(a.sort_order) : (a.unit_code === 'PLANNING-WPS-II' ? 999 : 0);
+            const orderB = b.sort_order !== undefined && b.sort_order !== null ? Number(b.sort_order) : (b.unit_code === 'PLANNING-WPS-II' ? 999 : 0);
+            return orderA - orderB;
+          })
           .map(u => ({
             id: u.id,
             unit_name: u.unit_name,
@@ -86,6 +112,7 @@ const dashboardController = {
             unit_type: u.unit_type,
             location: u.location,
             status: u.status,
+            sort_order: u.sort_order !== undefined ? u.sort_order : 0,
             children: buildSubTree(u.id)
           }));
       };

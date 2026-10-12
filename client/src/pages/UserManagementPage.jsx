@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { DataTable } from '../components/common/DataTable';
 import { RecordModal } from '../components/common/RecordModal';
+import { ConfirmModal } from '../components/common/ConfirmModal';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { formatDate } from '../utils/formatters';
+import { buildUnitTree } from '../utils/unitTree';
 import { 
   UserCheck, UserX, Shield, Warehouse, Plus, Eye, EyeOff, 
   Search, ChevronDown, ChevronRight, Building2, MapPin, 
@@ -113,16 +115,6 @@ const UnitPickerTreeNode = ({
         <Warehouse className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-signal' : 'text-slate'}`} />
       )}
       <span className="truncate flex-1">{node.unit_name}</span>
-      <span className={`text-[10px] font-mono shrink-0 px-1.5 py-0.5 rounded ${
-        isSelected ? 'bg-signal/20 text-signal font-bold' : 'text-slate bg-surface border border-line'
-      }`}>
-        {node.unit_code}
-      </span>
-      {node.location && (
-        <span className="text-[10px] text-slate ml-1 shrink-0 hidden sm:inline truncate max-w-[130px]">
-          ({node.location})
-        </span>
-      )}
     </div>
   );
 };
@@ -141,6 +133,17 @@ export const UserManagementPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [unitSearch, setUnitSearch] = useState('');
   const [expandedBranches, setExpandedBranches] = useState({});
+  const [emailError, setEmailError] = useState('');
+
+  // Field Refs for validation focus
+  const fullNameRef = useRef(null);
+  const usernameRef = useRef(null);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
+
+  // Delete User Confirmation State
+  const [userToDelete, setUserToDelete] = useState(null);
+  const canDeleteUsers = isSuperAdmin || isLocalAdmin || currentUser?.role === 'super_admin' || currentUser?.role === 'local_admin';
 
   const [formData, setFormData] = useState({
     username: '',
@@ -177,6 +180,7 @@ export const UserManagementPage = () => {
   const handleOpenAdd = () => {
     setEditingUser(null);
     setShowPassword(false);
+    setEmailError('');
     setUnitSearch('');
     setFormData({
       username: '',
@@ -194,6 +198,7 @@ export const UserManagementPage = () => {
   const handleOpenEdit = (user) => {
     setEditingUser(user);
     setShowPassword(false);
+    setEmailError('');
     setUnitSearch('');
     const currentUnitId = (user.units && user.units.length > 0) ? user.units[0].id : '';
     setFormData({
@@ -219,9 +224,54 @@ export const UserManagementPage = () => {
     }
   };
 
+  const handleDeleteClick = (user) => {
+    setUserToDelete(user);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!userToDelete) return;
+    try {
+      const res = await api.delete(`/users/${userToDelete.id}`);
+      toast.success(res.message || 'User deleted successfully.');
+      setUserToDelete(null);
+      await fetchData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete user.');
+      setUserToDelete(null);
+    }
+  };
+
   const handleSave = async () => {
-    if (!formData.username.trim() || !formData.full_name.trim() || !formData.role) {
-      toast.error('Username, Full Legal Name, and Assigned Role are required.');
+    setEmailError('');
+
+    if (!formData.full_name.trim()) {
+      fullNameRef.current?.focus();
+      toast.error('Full Legal Name is required.');
+      return;
+    }
+
+    if (!formData.username.trim()) {
+      usernameRef.current?.focus();
+      toast.error('Username is required.');
+      return;
+    }
+
+    const trimmedEmail = (formData.email || '').trim();
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      emailRef.current?.focus();
+      return;
+    }
+
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(trimmedEmail) || trimmedEmail.includes('..')) {
+      setEmailError('Please enter a valid email address.');
+      emailRef.current?.focus();
+      return;
+    }
+
+    if (!formData.role) {
+      toast.error('Assigned Role is required.');
       return;
     }
 
@@ -231,12 +281,17 @@ export const UserManagementPage = () => {
     }
 
     if (!editingUser && !formData.password) {
+      passwordRef.current?.focus();
       toast.error('Initial temporary password is required.');
       return;
     }
 
+    const normalizedEmail = trimmedEmail.toLowerCase();
     const payload = {
       ...formData,
+      full_name: formData.full_name.trim(),
+      username: formData.username.trim(),
+      email: normalizedEmail,
       unit_id: formData.unit_id,
       unit_ids: [formData.unit_id], // Single-unit array for backend compatibility
       permission_level: formData.role === 'employee' ? (formData.permission_level || 'read_write') : null
@@ -254,6 +309,10 @@ export const UserManagementPage = () => {
       setModalOpen(false);
       fetchData();
     } catch (err) {
+      if (err.message && err.message.toLowerCase().includes('email')) {
+        setEmailError(err.message);
+        emailRef.current?.focus();
+      }
       toast.error(err.message || 'Failed to save user account.');
     } finally {
       setSubmitting(false);
@@ -268,27 +327,7 @@ export const UserManagementPage = () => {
   };
 
   // Build hierarchical unit tree for the single-select picker
-  const unitTree = useMemo(() => {
-    if (!units || units.length === 0) return [];
-    const childrenMap = new Map();
-    units.forEach(u => {
-      const pid = u.parent_unit_id || null;
-      if (!childrenMap.has(pid)) childrenMap.set(pid, []);
-      childrenMap.get(pid).push(u);
-    });
-
-    const buildNode = (unit) => {
-      const children = (childrenMap.get(unit.id) || []).map(buildNode);
-      return {
-        ...unit,
-        children
-      };
-    };
-
-    const unitIds = new Set(units.map(u => u.id));
-    const roots = units.filter(u => !u.parent_unit_id || !unitIds.has(u.parent_unit_id));
-    return roots.map(buildNode);
-  }, [units]);
+  const unitTree = useMemo(() => buildUnitTree(units), [units]);
 
   // Selected unit object for display feedback
   const selectedUnit = useMemo(() => {
@@ -411,6 +450,9 @@ export const UserManagementPage = () => {
         data={users}
         loading={loading}
         onEdit={handleOpenEdit}
+        onDelete={canDeleteUsers ? handleDeleteClick : null}
+        deleteTooltip="Delete user"
+        isRowDeletable={(row) => row.id !== currentUser?.id}
         searchPlaceholder="Search staff by name, username, role..."
         emptyMessage="No staff accounts found."
       />
@@ -423,13 +465,15 @@ export const UserManagementPage = () => {
         onSubmit={handleSave}
         submitLabel={editingUser ? 'Save Updates' : 'Create Account'}
         loading={submitting}
-        submitDisabled={!isFormValid}
       >
         <div className="space-y-4 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-medium text-ink mb-1">Full Legal Name</label>
+              <label className="block font-medium text-ink mb-1">
+                Full Legal Name <span className="text-[#B4483A]">*</span>
+              </label>
               <input
+                ref={fullNameRef}
                 type="text"
                 required
                 placeholder="e.g. Nihal Fernando"
@@ -440,8 +484,11 @@ export const UserManagementPage = () => {
             </div>
 
             <div>
-              <label className="block font-medium text-ink mb-1">Username</label>
+              <label className="block font-medium text-ink mb-1">
+                Username <span className="text-[#B4483A]">*</span>
+              </label>
               <input
+                ref={usernameRef}
                 type="text"
                 required
                 disabled={!!editingUser}
@@ -455,14 +502,32 @@ export const UserManagementPage = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-medium text-ink mb-1">EDL Corporate Email</label>
+              <label className="block font-medium text-ink mb-1">
+                EDL Corporate Email <span className="text-[#B4483A]">*</span>
+              </label>
               <input
+                ref={emailRef}
+                id="staff-email-input"
                 type="email"
+                required
                 placeholder="n.fernando@edl.lk"
                 value={formData.email}
-                onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
-                className="w-full px-3 py-2 bg-surface border border-line rounded focus:outline-none focus:border-signal text-ink"
+                onChange={(e) => {
+                  setFormData(p => ({ ...p, email: e.target.value }));
+                  if (emailError) setEmailError('');
+                }}
+                className={`w-full px-3 py-2 bg-surface border rounded focus:outline-none text-ink transition-colors ${
+                  emailError
+                    ? 'border-[#B4483A] focus:border-[#B4483A] ring-1 ring-[#B4483A]/30'
+                    : 'border-line focus:border-signal'
+                }`}
               />
+              {emailError && (
+                <p className="text-[11px] text-[#B4483A] mt-1 flex items-center gap-1 font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{emailError}</span>
+                </p>
+              )}
             </div>
 
             <div>
@@ -479,7 +544,9 @@ export const UserManagementPage = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-medium text-ink mb-1">Assigned Role</label>
+              <label className="block font-medium text-ink mb-1">
+                Assigned Role <span className="text-[#B4483A]">*</span>
+              </label>
               <select
                 value={formData.role}
                 onChange={(e) => {
@@ -524,9 +591,12 @@ export const UserManagementPage = () => {
 
           {!editingUser && (
             <div>
-              <label className="block font-medium text-ink mb-1">Initial Temporary Password</label>
+              <label className="block font-medium text-ink mb-1">
+                Initial Temporary Password <span className="text-[#B4483A]">*</span>
+              </label>
               <div className="relative">
                 <input
+                  ref={passwordRef}
                   id="staff-password-input"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Set initial password"
@@ -556,7 +626,7 @@ export const UserManagementPage = () => {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block font-medium text-ink">
-                Assigned Organizational Unit <span className="text-signal">*</span>
+                Assigned Organizational Unit <span className="text-[#B4483A]">*</span>
               </label>
               {isLocalAdmin && (
                 <span className="text-[10px] text-signal font-mono font-medium">
@@ -642,6 +712,19 @@ export const UserManagementPage = () => {
           </div>
         </div>
       </RecordModal>
+
+      {/* Delete User Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(userToDelete)}
+        onClose={() => setUserToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete User?"
+        message={`Are you sure you want to permanently delete ${userToDelete?.full_name} (@${userToDelete?.username})? This cannot be undone.`}
+        itemDetail='Hint: "Deactivate" can be used instead to keep the history.'
+        confirmLabel="Yes, Delete"
+        cancelLabel="Cancel"
+        isDestructive={true}
+      />
     </AppShell>
   );
 };

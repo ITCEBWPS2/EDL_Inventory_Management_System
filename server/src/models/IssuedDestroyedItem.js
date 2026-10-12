@@ -31,6 +31,15 @@ const IssuedDestroyedItemSchema = new mongoose.Schema(
       type: String,
       required: true
     },
+    unit_id: {
+      type: String,
+      default: null,
+      index: true
+    },
+    serial_number: {
+      type: String,
+      default: null
+    },
     verification_id: {
       type: String,
       default: null,
