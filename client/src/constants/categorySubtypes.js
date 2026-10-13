@@ -184,7 +184,8 @@ export const SUBTYPE_METADATA = {
       'Modem',
       'Wi-Fi Dongle',
       'Patch Panel',
-      'Network Toner & Probe'
+      'Network Toner & Probe',
+      'Managed Access Point'
     ]
   },
   'servers-storage': {

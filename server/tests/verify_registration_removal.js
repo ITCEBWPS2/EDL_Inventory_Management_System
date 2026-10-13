@@ -1,8 +1,13 @@
 const http = require('http');
+const app = require('../src/server');
+const { setupTestDb, teardownTestDb } = require('./testHelper');
+
+let server;
+let baseUrl = 'http://localhost:5000/api';
 
 const request = (path, method = 'GET', body = null, token = null) => {
   return new Promise((resolve, reject) => {
-    const url = new URL('http://localhost:5000/api' + path);
+    const url = new URL(baseUrl + path);
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
@@ -22,6 +27,14 @@ const request = (path, method = 'GET', body = null, token = null) => {
 };
 
 (async () => {
+  await setupTestDb();
+  await new Promise((resolve) => {
+    server = app.listen(0, () => {
+      baseUrl = `http://127.0.0.1:${server.address().port}/api`;
+      resolve();
+    });
+  });
+
   console.log('=== VERIFYING PUBLIC REGISTRATION REMOVAL & ROLE RESTRICTIONS ===\n');
 
   // 1. Direct hit to old public registration endpoint
@@ -131,6 +144,8 @@ const request = (path, method = 'GET', body = null, token = null) => {
   if (ladminInScope.status !== 201) throw new Error('Local Admin should successfully create users in scope!');
 
   console.log('\nAll registration removal and role/permission/scoping checks passed successfully!');
+  if (server) server.close();
+  await teardownTestDb();
 })().catch(err => {
   console.error('Test failed:', err);
   process.exit(1);

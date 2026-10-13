@@ -1,8 +1,13 @@
 const http = require('http');
+const app = require('../src/server');
+const { setupTestDb, teardownTestDb } = require('./testHelper');
+
+let server;
+let baseUrl = 'http://localhost:5000/api';
 
 const login = (username, password) => {
   return new Promise((resolve, reject) => {
-    const req = http.request('http://localhost:5000/api/auth/login', {
+    const req = http.request(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }, (res) => {
@@ -32,6 +37,14 @@ const accounts = [
 ];
 
 (async () => {
+  await setupTestDb();
+  await new Promise((resolve) => {
+    server = app.listen(0, () => {
+      baseUrl = `http://127.0.0.1:${server.address().port}/api`;
+      resolve();
+    });
+  });
+
   console.log('--- Testing All 6 Seeded Accounts with Simple Passwords ---');
   let allPassed = true;
   for (const acc of accounts) {
@@ -44,6 +57,9 @@ const accounts = [
   console.log('\n--- Testing Bad Password (Should be 401) ---');
   const badRes = await login('sadmin@edl.lk', 'wrongpass999');
   console.log(`[${badRes.status === 401 ? 'PASS' : 'FAIL'}] sadmin@edl.lk (wrongpass999) -> Status: ${badRes.status} (${badRes.body.message})`);
+
+  if (server) server.close();
+  await teardownTestDb();
 
   if (allPassed && badRes.status === 401) {
     console.log('\nAll simple password authentications verified successfully!');

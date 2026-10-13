@@ -3,8 +3,10 @@
 
 const db = require('../src/services/db');
 const assert = require('assert');
+const { setupTestDb, teardownTestDb } = require('./testHelper');
 
 async function runVerification() {
+  await setupTestDb();
   console.log('--- Starting Decoupled Received Items Verification ---');
 
   const testUnitId = '11111111-1111-1111-1111-111111111145'; // Homagama CSC
@@ -88,6 +90,7 @@ async function runVerification() {
   console.log('✓ Step 7: Original received record is permanent historical log and untouched');
 
   console.log('--- All Decoupling Verification Checks PASSED Successfully! ---');
+  await teardownTestDb();
   process.exit(0);
 }
 

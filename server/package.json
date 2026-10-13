@@ -12,7 +12,8 @@
     "migrate:unit-order": "node src/scripts/migrate-unit-order.js",
     "migrate:unit-locations": "node src/scripts/migrate-unit-locations.js",
     "migrate:unit-codes": "node src/scripts/migrate-unit-codes.js",
-    "import:backup": "node src/scripts/import-backup.js"
+    "import:backup": "node src/scripts/import-backup.js",
+    "cleanup:junk-item": "node src/scripts/remove-junk-item.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -119,6 +119,7 @@ const ITEM_TYPE_CODES = {
   'Wi-Fi Dongle': 'DONGLE-NET',
   'Patch Panel': 'PATCHPNL-NET',
   'Network Toner & Probe': 'TONER-NET',
+  'Managed Access Point': 'MAP-NET',
   'Network Server': 'NET-SRV',
   'Billing Server': 'BILLING-SRV',
   'Server with License': 'LICENSED-SRV',

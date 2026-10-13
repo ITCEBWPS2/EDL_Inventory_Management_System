@@ -5,11 +5,15 @@ const seed = require('../src/scripts/seed');
 let mongod = null;
 
 async function setupTestDb() {
+  process.env.NODE_ENV = 'test';
+  process.env.TEST_DB_ACTIVE = 'true';
+
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();
   }
   mongod = await MongoMemoryServer.create({
-    instance: { dbName: 'edl_ims' }
+    instance: { dbName: 'edl_ims' },
+    spawn: { timeout: 30000 }
   });
   const uri = `${mongod.getUri()}edl_ims`;
   process.env.MONGODB_URI = uri;
@@ -28,6 +32,7 @@ async function teardownTestDb() {
     await mongod.stop();
     mongod = null;
   }
+  delete process.env.TEST_DB_ACTIVE;
 }
 
 module.exports = {

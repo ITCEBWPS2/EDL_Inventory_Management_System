@@ -131,7 +131,6 @@ const categories = [
 ];
 
 const inventory_items = [
-  { id: '33333333-3333-3333-3333-333333333301', item_name: '100 kVA 33kV/400V Distribution Transformer', item_code: 'TX-100KVA-01', category: 'Tools & Equipment', category_id: '22222222-2222-2222-2222-222222222206', unit_id: '11111111-1111-1111-1111-111111111145', quantity: 12, serial_number: 'SN-TX-2024-8891', status: 'In Stock', sub_type: 'power-utility-equipment' },
   { id: '33333333-3333-3333-3333-333333333302', item_name: '160 kVA 11kV/400V Sealed Transformer', item_code: 'TX-160KVA-02', category: 'Tools & Equipment', category_id: '22222222-2222-2222-2222-222222222206', unit_id: '11111111-1111-1111-1111-111111111145', quantity: 6, serial_number: 'SN-TX-2024-9104', status: 'In Stock', sub_type: 'power-utility-equipment' },
   { id: '33333333-3333-3333-3333-333333333303', item_name: '3-Phase 60A Smart Energy Meter (GPRS)', item_code: 'MTR-3PH-88', category: 'Network & Communication Equipment', category_id: '22222222-2222-2222-2222-222222222203', unit_id: '11111111-1111-1111-1111-111111111145', quantity: 85, serial_number: 'SN-MTR-3P-4401', status: 'In Stock', sub_type: 'network-equipment' },
   { id: '33333333-3333-3333-3333-333333333304', item_name: 'Single Phase 30A Digital Energy Meter', item_code: 'MTR-1PH-12', category: 'Tools & Equipment', category_id: '22222222-2222-2222-2222-222222222206', unit_id: '11111111-1111-1111-1111-111111111145', quantity: 140, serial_number: 'SN-MTR-1P-7720', status: 'In Stock', sub_type: 'electrical-tools-testing-equipment' },

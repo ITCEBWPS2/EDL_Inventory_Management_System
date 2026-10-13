@@ -155,6 +155,7 @@ export const ITEM_TYPE_CODES = {
   'Wi-Fi Dongle': 'DONGLE-NET',
   'Patch Panel': 'PATCHPNL-NET',
   'Network Toner & Probe': 'TONER-NET',
+  'Managed Access Point': 'MAP-NET',
 
   // Servers & Storage (SRV)
   'Network Server': 'NET-SRV',

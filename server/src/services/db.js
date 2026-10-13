@@ -464,6 +464,7 @@ const db = {
         if (stLower === 'kitchen-refreshment-equipment') return code.startsWith('ktc-') || code.includes('-ktc');
         if (stLower === 'office-general-equipment' || stLower === 'office & general equipment') return code.startsWith('oge-') || code.includes('-oge') || code.includes('/oge/');
         if (stLower === 'computers-peripherals' || stLower === 'computers & peripherals') return code.startsWith('cmp-') || code.includes('-cmp') || code.includes('/cmp/');
+        if (stLower === 'network-equipment') return code.startsWith('net-') || code.includes('-net') || code.includes('/net/');
         return false;
       });
     }

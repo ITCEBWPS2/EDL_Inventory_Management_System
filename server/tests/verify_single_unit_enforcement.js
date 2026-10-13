@@ -1,10 +1,15 @@
 const http = require('http');
+const app = require('../src/server');
+const { setupTestDb, teardownTestDb } = require('./testHelper');
+
+let server;
+let baseUrl = 'http://localhost:5000';
 
 const request = (path, method, body, token) => {
   return new Promise((resolve, reject) => {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const req = http.request(`http://localhost:5000${path}`, {
+    const req = http.request(`${baseUrl}${path}`, {
       method,
       headers
     }, (res) => {
@@ -25,6 +30,14 @@ const request = (path, method, body, token) => {
 };
 
 (async () => {
+  await setupTestDb();
+  await new Promise((resolve) => {
+    server = app.listen(0, () => {
+      baseUrl = `http://127.0.0.1:${server.address().port}`;
+      resolve();
+    });
+  });
+
   console.log('=== VERIFYING SINGLE-UNIT ENFORCEMENT & STRUCTURAL AREA RESTRICTIONS ===\n');
 
   // 1. Login as Super Admin
@@ -167,4 +180,7 @@ const request = (path, method, body, token) => {
   }
 
   console.log('\n ALL BACKEND ENFORCEMENT & STRUCTURAL BRANCH RESTRICTION TESTS PASSED!');
+  if (server) server.close();
+  await teardownTestDb();
+  process.exit(0);
 })();

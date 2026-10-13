@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const app = require('../src/server');
 const { setupTestDb, teardownTestDb } = require('./testHelper');
+const db = require('../src/services/db');
 
 let server = null;
 let API_BASE = 'http://localhost:5000/api';
@@ -91,6 +92,17 @@ test('End-to-End Credential-Based Role Access Verification for 6 Seed Accounts',
   const HOMAGAMA_CSC = '11111111-1111-1111-1111-111111111145';
   const MALAMBE_CSC = '11111111-1111-1111-1111-111111111146';
   const CALL_CENTER_DCC = '11111111-1111-1111-1111-111111111161';
+
+  // Create temporary in-memory item for transaction tests
+  const tempTestItem = await db.createInventoryItem({
+    item_name: 'Test Clerical Desk',
+    item_code: 'TEST-DESK-E2E-01',
+    category: 'Furniture',
+    unit_id: HOMAGAMA_CSC,
+    quantity: 10,
+    status: 'In Stock'
+  });
+  const TEST_ITEM_ID = tempTestItem.id;
 
   // Role 1: Super Admin
   await t.test('1. Super Admin: full system-wide access and oversight, no unit restriction', async () => {
@@ -194,7 +206,7 @@ test('End-to-End Credential-Based Role Access Verification for 6 Seed Accounts',
 
     // Can record received transaction in Homagama
     const rxRes = await request('/transactions/received', 'POST', {
-      item_id: '33333333-3333-3333-3333-333333333301',
+      item_id: TEST_ITEM_ID,
       quantity: 2,
       date: '2026-09-07',
       unit_id: HOMAGAMA_CSC,
@@ -209,7 +221,7 @@ test('End-to-End Credential-Based Role Access Verification for 6 Seed Accounts',
 
     // Blocked from other units
     const badRx = await request('/transactions/received', 'POST', {
-      item_id: '33333333-3333-3333-3333-333333333301',
+      item_id: TEST_ITEM_ID,
       quantity: 1,
       date: '2026-09-07',
       unit_id: CALL_CENTER_DCC,
@@ -243,7 +255,7 @@ test('End-to-End Credential-Based Role Access Verification for 6 Seed Accounts',
 
     // BLOCKED from creating received transaction
     const postRx = await request('/transactions/received', 'POST', {
-      item_id: '33333333-3333-3333-3333-333333333301',
+      item_id: TEST_ITEM_ID,
       quantity: 1,
       unit_id: HOMAGAMA_CSC,
       voucher_no: 'RO-FAIL'
@@ -252,7 +264,7 @@ test('End-to-End Credential-Based Role Access Verification for 6 Seed Accounts',
 
     // BLOCKED from creating expended transaction
     const postExp = await request('/transactions/expended', 'POST', {
-      item_id: '33333333-3333-3333-3333-333333333301',
+      item_id: TEST_ITEM_ID,
       quantity: 1,
       unit_id: HOMAGAMA_CSC,
       voucher_no: 'RO-FAIL',

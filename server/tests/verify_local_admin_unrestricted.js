@@ -32,7 +32,10 @@ function request(path, method = 'GET', body = null, token = null) {
   });
 }
 
+const { setupTestDb, teardownTestDb } = require('./testHelper');
+
 test('Local Admin Unrestricted Location Access & Switcher Verification', async (t) => {
+  await setupTestDb();
   await new Promise((resolve) => {
     server = app.listen(0, () => {
       baseUrl = `http://127.0.0.1:${server.address().port}/api`;
@@ -40,8 +43,9 @@ test('Local Admin Unrestricted Location Access & Switcher Verification', async (
     });
   });
 
-  t.after(() => {
+  t.after(async () => {
     if (server) server.close();
+    await teardownTestDb();
   });
 
   // 1. Authenticate as Local Admin
