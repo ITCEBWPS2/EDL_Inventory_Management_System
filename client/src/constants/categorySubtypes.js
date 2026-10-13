@@ -35,7 +35,8 @@ export const CATEGORY_SUBTYPES = {
     { name: 'Power & Utility Equipment', slug: 'power-utility-equipment' },
     { name: 'Air Conditioning & Ventilation', slug: 'air-conditioning-ventilation' },
     { name: 'Cleaning Equipment', slug: 'cleaning-equipment' },
-    { name: 'Kitchen / Refreshment Equipment', slug: 'kitchen-refreshment-equipment' }
+    { name: 'Kitchen / Refreshment Equipment', slug: 'kitchen-refreshment-equipment' },
+    { name: 'Office & General Equipment', slug: 'office-general-equipment' }
   ]
 };
 
@@ -127,7 +128,8 @@ export const SUBTYPE_METADATA = {
       'Backup Monitor',
       'Keyboard',
       'Mouse',
-      'DVD Writer'
+      'DVD Writer',
+      'Tab'
     ]
   },
   'storage-devices': {
@@ -361,7 +363,10 @@ export const SUBTYPE_METADATA = {
       'Current Measuring Equipment',
       'LV Power Quality Analyzer',
       'Drill Machine',
-      'Electric Blower'
+      'Electric Blower',
+      'Trimble GPS Receiver',
+      'Bluebird Data Collector',
+      'Binocular'
     ]
   },
   'tool-storage-handling': {
@@ -421,6 +426,23 @@ export const SUBTYPE_METADATA = {
       'Water Dispenser',
       'Kettle',
       'Electric Jug'
+    ]
+  },
+  'office-general-equipment': {
+    codePrefix: 'OGE',
+    singularTitle: 'Office & General Equipment',
+    subTypeFieldLabel: 'Item Type',
+    subTypeOptions: [
+      'Briefcase',
+      'Calculator',
+      'Stapler',
+      'Cello Tape Machine',
+      'Cash Box',
+      'Wall Clock',
+      'Wireless Door Bell',
+      'Ladder',
+      'Puncher (L)',
+      'Puncher (S)'
     ]
   },
 
@@ -638,6 +660,9 @@ export const itemMatchesSubType = (item, subTypeSlug) => {
   }
   if (target === 'kitchen-refreshment-equipment') {
     return (item.sub_type === 'kitchen-refreshment-equipment') || code.startsWith('ktc-') || code.includes('-ktc-');
+  }
+  if (target === 'office-general-equipment') {
+    return (item.sub_type === 'office-general-equipment') || code.startsWith('oge-') || code.includes('-oge-') || code.includes('/oge/');
   }
 
   // Legacy Tools & Equipment (fallback)

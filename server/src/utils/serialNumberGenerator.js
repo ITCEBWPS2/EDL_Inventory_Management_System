@@ -45,7 +45,9 @@ const SUBCATEGORY_CODES = {
   'power-utility-equipment': 'PUE',
   'air-conditioning-ventilation': 'ACV',
   'cleaning-equipment': 'CLN',
-  'kitchen-refreshment-equipment': 'KTC'
+  'kitchen-refreshment-equipment': 'KTC',
+  'office-general-equipment': 'OGE',
+  'Office & General Equipment': 'OGE'
 };
 
 const ITEM_TYPE_CODES = {
@@ -91,6 +93,7 @@ const ITEM_TYPE_CODES = {
   Keyboard: 'KYBRD-CMP',
   Mouse: 'MOUSE-CMP',
   'DVD Writer': 'DVDWR-CMP',
+  Tab: 'TAB-CMP',
   'Pen Drive': 'PENDRV-STR',
   'External Hard Drive': 'EXTHDD-STR',
   'Portable Backup Drive': 'PORTDRV-STR',
@@ -138,7 +141,29 @@ const ITEM_TYPE_CODES = {
   'Collar Mic & Wireless Transmitter': 'COLLARMIC-AUD',
   Projector: 'PROJ-DSP',
   'HDMI Cable': 'HDMI-DSP',
-  'LED Television': 'LEDTV-DSP'
+  'LED Television': 'LEDTV-DSP',
+
+  // Office & General Equipment (OGE)
+  Briefcase: 'BRIEFCASE-OGE',
+  Calculator: 'CALCULATOR-OGE',
+  Stapler: 'STAPLER-OGE',
+  'Cello Tape Machine': 'CELLO-TAPE-OGE',
+  'Cello Tape': 'CELLO-TAPE-OGE',
+  'Cash Box': 'CASH-BOX-OGE',
+  'Wall Clock': 'WALL-CLOCK-OGE',
+  'Wireless Door Bell': 'DOOR-BELL-OGE',
+  'Door Bell': 'DOOR-BELL-OGE',
+  Ladder: 'LADDER-OGE',
+  'Puncher (L)': 'PUNCHER-L-OGE',
+  'Puncher (S)': 'PUNCHER-S-OGE',
+  'Puncher(L)': 'PUNCHER-L-OGE',
+  'Puncher(S)': 'PUNCHER-S-OGE',
+
+  // Electrical Tools & Testing Equipment (ETE)
+  'Trimble GPS Receiver': 'TRIMBLE-GPS-RECEIVER-ETE',
+  'Bluebird Data Collector': 'BLUEBIRD-DATA-COLLECTOR-ETE',
+  'Binocular': 'BINOCULAR-ETE',
+  'Binoculars': 'BINOCULAR-ETE'
 };
 
 function resolveUnitCode(unit) {

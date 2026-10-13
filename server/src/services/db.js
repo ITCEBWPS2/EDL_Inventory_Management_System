@@ -462,6 +462,8 @@ const db = {
         if (stLower === 'air-conditioning-ventilation') return code.startsWith('acv-') || code.includes('-acv');
         if (stLower === 'cleaning-equipment') return code.startsWith('cln-') || code.includes('-cln');
         if (stLower === 'kitchen-refreshment-equipment') return code.startsWith('ktc-') || code.includes('-ktc');
+        if (stLower === 'office-general-equipment' || stLower === 'office & general equipment') return code.startsWith('oge-') || code.includes('-oge') || code.includes('/oge/');
+        if (stLower === 'computers-peripherals' || stLower === 'computers & peripherals') return code.startsWith('cmp-') || code.includes('-cmp') || code.includes('/cmp/');
         return false;
       });
     }
