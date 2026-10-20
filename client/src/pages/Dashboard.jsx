@@ -165,7 +165,7 @@ export const Dashboard = () => {
                         <div className="text-[10px] text-slate font-mono">{tx.item_code}</div>
                       </td>
                       <td className="py-2.5 px-3 font-mono text-slate">
-                        {tx.voucher_no}
+                        {tx.voucher_no || '—'}
                       </td>
                       <td className="py-2.5 px-3 text-right font-semibold tabular-nums text-ink">
                         {tx.type === 'Expended' ? `-${tx.quantity}` : `+${tx.quantity}`}

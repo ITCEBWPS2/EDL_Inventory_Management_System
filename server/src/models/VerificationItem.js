@@ -14,9 +14,30 @@ const VerificationItemSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    item_id: {
+      type: String,
+      default: null,
+      index: true
+    },
     item_code: {
       type: String,
       default: ''
+    },
+    serial_numbers: {
+      type: [String],
+      default: []
+    },
+    manufacturer_sn: {
+      type: String,
+      default: ''
+    },
+    manufacturer_serial_numbers: {
+      type: [String],
+      default: []
+    },
+    is_batch: {
+      type: Boolean,
+      default: false
     },
     item_name: {
       type: String,
@@ -57,6 +78,18 @@ const VerificationItemSchema = new mongoose.Schema(
     disposition: {
       type: String,
       default: ''
+    },
+    issued_destroyed: {
+      type: String,
+      default: ''
+    },
+    issued_destroyed_id: {
+      type: String,
+      default: null
+    },
+    issued_destroyed_qty: {
+      type: Number,
+      default: null
     },
     in_inventory: {
       type: Boolean,

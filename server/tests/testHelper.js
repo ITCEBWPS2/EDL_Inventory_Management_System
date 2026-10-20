@@ -12,8 +12,8 @@ async function setupTestDb() {
     await mongoose.disconnect();
   }
   mongod = await MongoMemoryServer.create({
-    instance: { dbName: 'edl_ims' },
-    spawn: { timeout: 30000 }
+    instance: { dbName: 'edl_ims', launchTimeout: 60000 },
+    spawn: { timeout: 60000 }
   });
   const uri = `${mongod.getUri()}edl_ims`;
   process.env.MONGODB_URI = uri;

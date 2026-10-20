@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { BackButton } from '../components/common/BackButton';
 import { formatDate, exportToCSV } from '../utils/formatters';
+import { SerialNumberCell } from '../components/verification/SerialNumberCell';
 import { Download, Printer, Plus, ChevronDown, Check } from 'lucide-react';
 
 export const VerificationHistory = () => {
@@ -56,6 +57,13 @@ export const VerificationHistory = () => {
                 date: v.date,
                 verified_by: verifiersDisplay,
                 item_code: item.item_code || '',
+                serial_numbers: Array.isArray(item.serial_numbers) && item.serial_numbers.length > 0
+                  ? item.serial_numbers
+                  : (item.item_code ? [item.item_code] : []),
+                manufacturer_serial_numbers: Array.isArray(item.manufacturer_serial_numbers)
+                  ? item.manufacturer_serial_numbers
+                  : [],
+                is_batch: item.is_batch ?? (Array.isArray(item.serial_numbers) && item.serial_numbers.length > 1),
                 item_name: item.item_name || '',
                 category: item.category || '',
                 in_inventory: item.in_inventory !== false,
@@ -103,22 +111,28 @@ export const VerificationHistory = () => {
       return;
     }
 
-    const exportData = displayItems.map((item, idx) => ({
-      'No': idx + 1,
-      'Year': item.year,
-      'Serial No.': item.item_code || '—',
-      'Item': item.item_name,
-      'Verification Date': item.date,
-      'Verified By': item.verified_by || '—',
-      'In Inventory': item.in_inventory ? 'Yes' : 'No',
-      'System Qty': item.system_qty,
-      'Physical Available': item.physical_available,
-      'Physical Not Available': item.physical_not_available,
-      'Condition': item.condition,
-      'Issued / Destroyed': item.disposition && item.disposition !== '—' ? item.disposition : '—',
-      'Special Remarks': item.remarks && item.remarks !== '—' ? item.remarks : '—',
-      'Label No.': item.label_no && item.label_no !== '—' ? item.label_no : '—'
-    }));
+    const exportData = displayItems.map((item, idx) => {
+      const serialsStr = Array.isArray(item.serial_numbers) && item.serial_numbers.length > 0
+        ? item.serial_numbers.join('; ')
+        : (item.item_code || '—');
+
+      return {
+        'No': idx + 1,
+        'Year': item.year,
+        'Serial No.': serialsStr,
+        'Item': item.item_name,
+        'Verification Date': formatDate(item.date),
+        'Verified By': item.verified_by || '—',
+        'In Inventory': item.in_inventory ? 'Yes' : 'No',
+        'System Qty': item.system_qty,
+        'Physical Available': item.physical_available,
+        'Physical Not Available': item.physical_not_available,
+        'Condition': item.condition,
+        'Issued / Destroyed': item.disposition && item.disposition !== '—' ? item.disposition : '—',
+        'Special Remarks': item.remarks && item.remarks !== '—' ? item.remarks : '—',
+        'Label No.': item.label_no && item.label_no !== '—' ? item.label_no : '—'
+      };
+    });
 
     exportToCSV(exportData, `EDL_Verification_History_${selectedYear}_${new Date().toISOString().split('T')[0]}.csv`);
     toast.success('Verification history exported successfully.');
@@ -161,7 +175,7 @@ export const VerificationHistory = () => {
             </div>
             <div>
               <span className="font-bold text-slate uppercase block">Report Generated</span>
-              <span className="font-semibold text-ink">{new Date().toISOString().split('T')[0]}</span>
+              <span className="font-semibold text-ink">{formatDate(new Date())}</span>
             </div>
           </div>
         </div>
@@ -238,24 +252,24 @@ export const VerificationHistory = () => {
 
       {/* Table: Horizontally Scrollable (matching Screenshots 7 & 8) */}
       <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-ink border-collapse">
-            <thead>
-              <tr className="border-b border-line bg-surface/70 font-semibold text-slate uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-3 w-12 text-center">No</th>
-                <th className="py-3 px-3 whitespace-nowrap">Year</th>
-                <th className="py-3 px-3 whitespace-nowrap">Serial No.</th>
-                <th className="py-3 px-4 min-w-[170px]">Item</th>
-                <th className="py-3 px-3 whitespace-nowrap">Verification Date</th>
-                <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">Verified By</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">In Inventory</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">System Qty</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Physical Available</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Physical Not Available</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Condition</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Issued / Destroyed</th>
-                <th className="py-3 px-4 min-w-[180px]">Special Remarks</th>
-                <th className="py-3 px-3 whitespace-nowrap">Label No</th>
+        <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto">
+          <table className="min-w-full text-left text-xs text-ink border-collapse table-auto">
+            <thead className="sticky top-0 z-20 bg-surface border-b border-line shadow-xs">
+              <tr className="border-b border-line bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
+                <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center sticky left-0 z-30 bg-surface">No</th>
+                <th className="py-2.5 px-3 w-16 min-w-[64px] max-w-[64px] whitespace-nowrap sticky left-[48px] z-30 bg-surface">Year</th>
+                <th className="py-2.5 px-3 min-w-[400px] w-[400px] whitespace-nowrap sticky left-[112px] z-30 bg-surface border-r border-line shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]">Serial No.</th>
+                <th className="py-2.5 px-4 min-w-[170px]">Item</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Verification Date</th>
+                <th className="py-2.5 px-4 min-w-[140px] whitespace-nowrap">Verified By</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">In Inventory</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">System Qty</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">Physical Available</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">Physical Not Available</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">Condition</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">Issued / Destroyed</th>
+                <th className="py-2.5 px-4 min-w-[180px]">Special Remarks</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Label No</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/60">
@@ -280,63 +294,69 @@ export const VerificationHistory = () => {
                   const dispStr = (item.disposition || '').toLowerCase();
 
                   return (
-                    <tr key={item.id || idx} className="hover:bg-surface/50 transition-colors">
-                      {/* 1. No */}
-                      <td className="py-3 px-3 text-center text-slate font-mono font-medium">
+                    <tr key={item.id || idx} className="hover:bg-surface/50 transition-colors group">
+                      {/* 1. No (Sticky Left) */}
+                      <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top sticky left-0 z-10 bg-card group-hover:bg-surface/50 w-12 min-w-[48px] max-w-[48px] transition-colors">
                         {idx + 1}
                       </td>
 
-                      {/* 2. Year */}
-                      <td className="py-3 px-3 font-mono font-bold text-ink whitespace-nowrap">
+                      {/* 2. Year (Sticky Left) */}
+                      <td className="py-2.5 px-3 font-mono font-bold text-ink whitespace-nowrap align-top sticky left-[48px] z-10 bg-card group-hover:bg-surface/50 w-16 min-w-[64px] max-w-[64px] transition-colors">
                         {item.year}
                       </td>
 
-                      {/* 3. Serial No. */}
-                      <td className="py-3 px-3 font-mono font-semibold text-ink whitespace-nowrap">
-                        {item.item_code || '—'}
+                      {/* 3. Serial No. (Sticky Left, strictly single line per serial, min-w-[400px]) */}
+                      <td className="py-2.5 px-3 min-w-[400px] w-[400px] align-top sticky left-[112px] z-10 bg-card group-hover:bg-surface/50 border-r border-line/60 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] transition-colors">
+                        <SerialNumberCell
+                          serialNumbers={item.serial_numbers}
+                          manufacturerSerialNumbers={item.manufacturer_serial_numbers}
+                          singleSerial={item.item_code}
+                          singleMfg={item.manufacturer_sn}
+                          resetTrigger={selectedYear}
+                        />
                       </td>
 
                       {/* 4. Item */}
-                      <td className="py-3 px-4 font-semibold text-ink leading-tight">
+                      <td className="py-2.5 px-4 font-semibold text-ink leading-snug align-top min-w-[170px]">
                         {item.item_name}
                       </td>
 
                       {/* 5. Verification Date */}
-                      <td className="py-3 px-3 font-mono text-slate whitespace-nowrap">
-                        {item.date ? String(item.date).split('T')[0] : '—'}
+                      <td className="py-2.5 px-3 font-mono text-slate whitespace-nowrap align-top">
+                        {formatDate(item.date)}
                       </td>
 
                       {/* 6. Verified By */}
-                      <td className="py-3 px-4 text-slate whitespace-nowrap">
+                      <td className="py-2.5 px-4 text-slate whitespace-nowrap align-top min-w-[140px]">
                         {item.verified_by || '—'}
                       </td>
 
                       {/* 7. In Inventory (black pill badge "Yes") */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap align-top">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-ink text-white">
                           Yes
                         </span>
                       </td>
 
                       {/* 8. System Qty */}
-                      <td className="py-3 px-3 text-center font-bold text-ink font-mono text-sm">
+                      <td className="py-2.5 px-3 text-center font-bold text-ink font-mono text-sm align-top whitespace-nowrap">
                         {item.system_qty}
                       </td>
 
                       {/* 9. Physical Available (green text) */}
-                      <td className="py-3 px-3 text-center font-mono font-bold text-[#2F7A5C] text-sm">
+                      <td className="py-2.5 px-3 text-center font-mono font-bold text-[#2F7A5C] text-sm align-top whitespace-nowrap">
                         {item.physical_available}
                       </td>
 
                       {/* 10. Physical Not Available (red if > 0, grey if 0) */}
-                      <td className={`py-3 px-3 text-center font-mono font-bold text-sm ${
+                      <td className={`py-2.5 px-3 text-center font-mono font-bold text-sm align-top whitespace-nowrap ${
                         isNotAvailPos ? 'text-[#B4483A]' : 'text-slate'
                       }`}>
                         {item.physical_not_available}
                       </td>
 
                       {/* 11. Condition (outline badge) */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap align-top">
                         {condStr === 'good' ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/50 text-emerald-700 bg-emerald-50/40">
                             Good
@@ -359,18 +379,18 @@ export const VerificationHistory = () => {
                       </td>
 
                       {/* 12. Issued / Destroyed (badge or "—") */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap align-top">
                         {dispStr === 'issued' ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/50 text-emerald-700 bg-emerald-50/40">
-                            Issued
+                            Issued{item.issued_destroyed_qty > 1 ? ` × ${item.issued_destroyed_qty}` : ''}
                           </span>
                         ) : dispStr === 'destroyed' ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-rose-500/50 text-rose-700 bg-rose-50/40">
-                            Destroyed
+                            Destroyed{item.issued_destroyed_qty > 1 ? ` × ${item.issued_destroyed_qty}` : ''}
                           </span>
-                        ) : item.disposition && item.disposition !== '—' ? (
+                        ) : (item.disposition && item.disposition !== '—' && item.disposition !== 'N/A') ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium border border-line text-slate">
-                            {item.disposition}
+                            {item.disposition}{item.issued_destroyed_qty > 1 ? ` × ${item.issued_destroyed_qty}` : ''}
                           </span>
                         ) : (
                           <span className="text-slate">—</span>
@@ -378,12 +398,12 @@ export const VerificationHistory = () => {
                       </td>
 
                       {/* 13. Special Remarks */}
-                      <td className="py-3 px-4 text-slate text-xs max-w-xs truncate">
+                      <td className="py-2.5 px-4 text-slate text-xs max-w-xs truncate align-top min-w-[180px]">
                         {item.remarks && item.remarks !== '—' ? item.remarks : <span className="text-slate">—</span>}
                       </td>
 
                       {/* 14. Label No */}
-                      <td className="py-3 px-3 font-mono font-medium text-ink whitespace-nowrap">
+                      <td className="py-2.5 px-3 font-mono font-medium text-ink whitespace-nowrap align-top">
                         {item.label_no && item.label_no !== '—' ? item.label_no : <span className="text-slate">—</span>}
                       </td>
                     </tr>

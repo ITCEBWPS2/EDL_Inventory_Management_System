@@ -57,10 +57,15 @@ const ITEM_TYPE_CODES = {
   'Low Back Chair': 'LOWBACK-CHR',
   'Mid Back Chair': 'MIDBACK-CHR',
   'High Back Chair': 'HIGHBACK-CHR',
+  'Computer Executive Chair': 'COMP-EXEC-CHR',
+  'Computer Typist Chair': 'COMP-TYPIST-CHR',
+  'Computer Assistant Chair': 'COMP-ASST-CHR',
+  'Front Chair': 'FRONT-CHR',
+
+  // Backward compatibility aliases
   'Computer Executive': 'COMP-EXEC-CHR',
   'Computer Typist': 'COMP-TYPIST-CHR',
   'Computer Assistant': 'COMP-ASST-CHR',
-  'Front Chair': 'FRONT-CHR',
   'Executive Table': 'EXEC-TBL',
   'Computer Table': 'COMP-TBL',
   'Writing Table': 'WRITE-TBL',
@@ -94,6 +99,7 @@ const ITEM_TYPE_CODES = {
   Mouse: 'MOUSE-CMP',
   'DVD Writer': 'DVDWR-CMP',
   Tab: 'TAB-CMP',
+  'HDMI to VGA Convertor': 'HDMIVGA-CMP',
   'Pen Drive': 'PENDRV-STR',
   'External Hard Drive': 'EXTHDD-STR',
   'Portable Backup Drive': 'PORTDRV-STR',
@@ -109,6 +115,7 @@ const ITEM_TYPE_CODES = {
   'Color A3 Printer': 'COLORA3-PRN',
   'Cheque Printer': 'CHEQUE-PRN',
   Plotter: 'PLOTTER-PRN',
+  'Dot Matrix Printer Backup': 'BCKDOTMTX-PRN',
   Scanner: 'SCANNER-SCN',
   'Photocopy Machine': 'PHOTOCOPY-SCN',
   'Fax Machine': 'FAX-SCN',
@@ -164,7 +171,8 @@ const ITEM_TYPE_CODES = {
   'Trimble GPS Receiver': 'TRIMBLE-GPS-RECEIVER-ETE',
   'Bluebird Data Collector': 'BLUEBIRD-DATA-COLLECTOR-ETE',
   'Binocular': 'BINOCULAR-ETE',
-  'Binoculars': 'BINOCULAR-ETE'
+  'Binoculars': 'BINOCULAR-ETE',
+  'Digital Multimeter': 'MULTIMETER-ETE'
 };
 
 function resolveUnitCode(unit) {

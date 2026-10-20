@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { BackButton } from '../components/common/BackButton';
 import { ConfirmModal } from '../components/common/ConfirmModal';
+import { DateInput } from '../components/common/DateInput';
+import { SerialNumberCell } from '../components/verification/SerialNumberCell';
+import { formatDate } from '../utils/formatters';
 import {
   MapPin,
   ClipboardCheck,
@@ -14,20 +17,325 @@ import {
   ChevronRight,
   X,
   AlertCircle,
-  Calendar,
   CheckCircle2,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Search,
+  Filter,
+  Check,
+  ExternalLink
 } from 'lucide-react';
 
 const CONDITION_OPTIONS = ['—', 'Good', 'Fair', 'Damaged', 'Obsolete', 'Needs Repair'];
+const ISSUED_DESTROYED_OPTIONS = ['—', 'Issued', 'Destroyed', 'N/A'];
+
+// Format ISO date-time into DD/MM/YYYY HH:mm
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+};
+
+// Check if a row has edits compared to its saved snapshot (or pristine state)
+const isRowDirty = (row, saved) => {
+  const curPhys = row.physical_qty !== '' && row.physical_qty !== null && !isNaN(Number(row.physical_qty))
+    ? Number(row.physical_qty)
+    : '';
+  const curCond = (row.condition && row.condition !== '—') ? row.condition : '—';
+  const curLabel = (row.label_no || '').trim();
+  const curRemarks = (row.remarks || '').trim();
+  const curIssuedDestroyed = (row.issued_destroyed && row.issued_destroyed !== '—') ? row.issued_destroyed : '—';
+  const curIssuedDestroyedQty = (curIssuedDestroyed === 'Issued' || curIssuedDestroyed === 'Destroyed')
+    ? (row.issued_destroyed_qty ? Number(row.issued_destroyed_qty) : 1)
+    : '';
+
+  if (!saved) {
+    return curPhys !== '' || curCond !== '—' || curLabel !== '' || curRemarks !== '' || curIssuedDestroyed !== '—';
+  }
+
+  const savedPhys = saved.physical_qty !== '' && saved.physical_qty !== null && !isNaN(Number(saved.physical_qty))
+    ? Number(saved.physical_qty)
+    : '';
+  const savedCond = (saved.condition && saved.condition !== '—') ? saved.condition : '—';
+  const savedLabel = (saved.label_no || '').trim();
+  const savedRemarks = (saved.remarks || '').trim();
+  const savedIssuedDestroyed = (saved.issued_destroyed && saved.issued_destroyed !== '—') ? saved.issued_destroyed : '—';
+  const savedIssuedDestroyedQty = (savedIssuedDestroyed === 'Issued' || savedIssuedDestroyed === 'Destroyed')
+    ? (saved.issued_destroyed_qty ? Number(saved.issued_destroyed_qty) : 1)
+    : '';
+
+  return (
+    curPhys !== savedPhys ||
+    curCond !== savedCond ||
+    curLabel !== savedLabel ||
+    curRemarks !== savedRemarks ||
+    curIssuedDestroyed !== savedIssuedDestroyed ||
+    curIssuedDestroyedQty !== savedIssuedDestroyedQty
+  );
+};
+
+// Memoized Table Row for smooth typing in large inventory tables
+const VerificationRow = memo(({
+  row,
+  idx,
+  searchQuery,
+  selectedCategoryFilter,
+  onFieldChange,
+  onPromptRemove,
+  onSaveRow,
+  onIssuedDestroyedSelect,
+  recordedQty = 0,
+  isSaving,
+  isDirty,
+  isSaved,
+  isReadOnly
+}) => {
+  const hasPhysQty = row.physical_qty !== '' && row.physical_qty !== null && !isNaN(Number(row.physical_qty));
+  const diff = hasPhysQty ? Number(row.difference) : null;
+  const markedQty = Number(row.issued_destroyed_qty || 1);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!isReadOnly && isDirty && !isSaving) {
+        onSaveRow(row.originalIndex, row);
+      }
+    }
+  };
+
+  return (
+    <tr className="hover:bg-surface/50 transition-colors group">
+      {/* 1. No (Plain table cell) */}
+      <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] border-r border-line/60">
+        {idx + 1}
+      </td>
+
+      {/* 2. Serial No. (Plain table cell, w-[420px] min-w-[400px], single line per serial, collapse for batches) */}
+      <td className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line/60">
+        <SerialNumberCell
+          serialNumbers={row.serial_numbers}
+          manufacturerSerialNumbers={row.manufacturer_serial_numbers}
+          singleSerial={row.item_code}
+          singleMfg={row.manufacturer_sn}
+          searchQuery={searchQuery}
+          resetTrigger={selectedCategoryFilter}
+        />
+      </td>
+
+      {/* 3. Item (wraps normally, min-w-[170px]) */}
+      <td className="py-2.5 px-4 font-semibold text-ink align-top min-w-[170px] leading-snug">
+        {row.item_name}
+      </td>
+
+      {/* 4. Category */}
+      <td className="py-2.5 px-3 text-slate align-top min-w-[130px] leading-snug">
+        {row.category}
+      </td>
+
+      {/* 5. System Qty (read-only, bold) */}
+      <td className="py-2.5 px-3 text-center font-bold text-ink font-mono text-sm align-top whitespace-nowrap min-w-[75px]">
+        {row.system_qty}
+      </td>
+
+      {/* 6. Physical Qty (numeric input, placeholder "—") */}
+      <td className="py-2.5 px-3 text-center align-top whitespace-nowrap min-w-[85px]">
+        <input
+          type="number"
+          min="0"
+          placeholder="—"
+          value={row.physical_qty ?? ''}
+          onChange={(e) => onFieldChange(row.originalIndex, 'physical_qty', e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isReadOnly}
+          className="w-18 px-2 py-1 text-center font-mono font-bold bg-surface border border-line rounded text-xs text-ink focus:outline-none focus:border-signal focus:ring-1 focus:ring-signal/30 disabled:opacity-60"
+        />
+      </td>
+
+      {/* 7. Difference (auto-calculated, color-coded) */}
+      <td className="py-2.5 px-3 text-center font-mono font-bold align-top whitespace-nowrap min-w-[75px]">
+        {diff === null ? (
+          <span className="text-slate font-normal">—</span>
+        ) : diff === 0 ? (
+          <span className="text-[#2F7A5C]">0</span>
+        ) : (
+          <span className="text-[#B4483A]">{diff > 0 ? `+${diff}` : diff}</span>
+        )}
+      </td>
+
+      {/* 8. Condition (dropdown) */}
+      <td className="py-2.5 px-3 align-top whitespace-nowrap min-w-[105px]">
+        <select
+          value={row.condition || '—'}
+          onChange={(e) => onFieldChange(row.originalIndex, 'condition', e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isReadOnly}
+          className="bg-surface border border-line rounded px-2 py-1 text-xs text-ink focus:outline-none focus:border-signal cursor-pointer disabled:opacity-60"
+        >
+          {CONDITION_OPTIONS.map(opt => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      </td>
+
+      {/* 9. Issued / Destroyed (dropdown + Qty input + status line) */}
+      <td className="py-2.5 px-3 align-top whitespace-nowrap min-w-[210px] w-[220px]">
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <select
+              value={row.issued_destroyed || '—'}
+              onChange={(e) => onIssuedDestroyedSelect(row.originalIndex, row, e.target.value)}
+              disabled={isReadOnly}
+              className="bg-surface border border-line rounded px-2 py-1 text-xs text-ink focus:outline-none focus:border-signal cursor-pointer disabled:opacity-60 flex-1 min-w-[100px]"
+            >
+              {ISSUED_DESTROYED_OPTIONS.map(opt => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+
+            {(row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') && (
+              <div className="flex items-center gap-1 shrink-0" title="Quantity marked as Issued / Destroyed">
+                <span className="text-[10px] text-slate font-medium">Qty:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={row.system_qty || 1}
+                  value={row.issued_destroyed_qty ?? 1}
+                  onChange={(e) => onFieldChange(row.originalIndex, 'issued_destroyed_qty', e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={isReadOnly}
+                  className="w-[52px] px-1 py-1 text-center font-mono font-bold bg-surface border border-line rounded text-xs text-ink focus:outline-none focus:border-signal disabled:opacity-60"
+                />
+              </div>
+            )}
+          </div>
+
+          {(row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') && (
+            <div className="flex items-center gap-1 text-[11px] pt-0.5">
+              {recordedQty >= markedQty ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-[#2F7A5C] bg-[#2F7A5C]/10 border border-[#2F7A5C]/20 px-1.5 py-0.5 rounded text-[10px]">
+                  <Check className="w-3 h-3 text-[#2F7A5C]" />
+                  <span>Recorded</span>
+                </span>
+              ) : recordedQty > 0 ? (
+                <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                  <span>Recorded {recordedQty} of {markedQty}</span>
+                </span>
+              ) : (
+                <span className="text-slate/80 text-[10px] italic">
+                  Pending record
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </td>
+
+      {/* 10. Label No (text input, placeholder "VL-0000") */}
+      <td className="py-2.5 px-3 align-top min-w-[95px] whitespace-nowrap">
+        <input
+          type="text"
+          placeholder="VL-0000"
+          value={row.label_no || ''}
+          onChange={(e) => onFieldChange(row.originalIndex, 'label_no', e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isReadOnly}
+          className="w-22 px-2 py-1 font-mono text-xs bg-surface border border-line rounded text-ink placeholder-slate focus:outline-none focus:border-signal disabled:opacity-60"
+        />
+      </td>
+
+      {/* 11. Remarks (optional text input) */}
+      <td className="py-2.5 px-4 align-top min-w-[140px]">
+        <input
+          type="text"
+          placeholder="Optional remarks"
+          value={row.remarks || ''}
+          onChange={(e) => onFieldChange(row.originalIndex, 'remarks', e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isReadOnly}
+          className="w-full min-w-[120px] px-2 py-1 text-xs bg-surface border border-line rounded text-ink placeholder-slate focus:outline-none focus:border-signal disabled:opacity-60"
+        />
+      </td>
+
+      {/* 12. Actions: Per-row Save Button + Remove "X" Button */}
+      <td className="py-2.5 px-3 align-top min-w-[120px] whitespace-nowrap">
+        <div className="flex items-center justify-center gap-1.5">
+          {/* Status / Save Action */}
+          {isSaving ? (
+            <div className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate bg-surface rounded">
+              <div className="w-3.5 h-3.5 border-2 border-line border-t-signal rounded-full animate-spin"></div>
+              <span className="hidden sm:inline">Saving</span>
+            </div>
+          ) : isDirty ? (
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Unsaved changes"></span>
+              <button
+                type="button"
+                onClick={() => onSaveRow(row.originalIndex, row)}
+                disabled={isReadOnly}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-signal hover:bg-[#1f406b] rounded shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                title="Save this row to draft (Enter)"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Save</span>
+              </button>
+            </div>
+          ) : isSaved ? (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2F7A5C] bg-[#2F7A5C]/10 border border-[#2F7A5C]/20 px-2 py-0.5 rounded shadow-2xs"
+              title="Row saved to draft"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#2F7A5C]" />
+              <span className="hidden sm:inline">Saved</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate/40 bg-surface/50 border border-line/40 rounded cursor-not-allowed opacity-50"
+              title="No changes to save"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Save</span>
+            </button>
+          )}
+
+          {/* Remove "x" Button */}
+          <button
+            type="button"
+            onClick={() => onPromptRemove(row.originalIndex, row)}
+            disabled={isReadOnly}
+            className="p-1 text-slate hover:text-[#B4483A] rounded transition-colors cursor-pointer disabled:opacity-40"
+            title="Remove item from verification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
 
 export const NewVerification = () => {
   const { user, selectedUnitId, selectedUnit } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const editId = searchParams.get('id');
+
+  const tableContainerRef = useRef(null);
+
+  const isReadOnly = user?.role === 'read_only';
 
   // Step 1: Entry Form | Step 2: Review & Confirm
   const [currentStep, setCurrentStep] = useState(1);
@@ -42,19 +350,33 @@ export const NewVerification = () => {
   const [verifier2, setVerifier2] = useState('');
   const [verifier3, setVerifier3] = useState('');
 
-  // Table items
+  // Table items & draft tracking
   const [items, setItems] = useState([]);
+  const [draftInfo, setDraftInfo] = useState(null); // { id, updated_at, savedCount }
+  const [savedSnapshots, setSavedSnapshots] = useState({}); // { [itemId]: { physical_qty, condition, label_no, remarks, issued_destroyed } }
+  const [savingRows, setSavingRows] = useState({}); // { [itemId]: boolean }
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [isDiscarding, setIsDiscarding] = useState(false);
+
   const [errors, setErrors] = useState({});
 
-  // Item removal confirmation dialog state
+  // Filter and search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+
+  // Modals state
   const [itemToRemove, setItemToRemove] = useState(null);
+  const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const [isCancelDraftModalOpen, setIsCancelDraftModalOpen] = useState(false);
+  const [isUnsavedLeaveModalOpen, setIsUnsavedLeaveModalOpen] = useState(false);
+  const [issuedDestroyedRecords, setIssuedDestroyedRecords] = useState([]);
 
   // Auto-sync year when date changes
   const handleDateChange = (e) => {
     const val = e.target.value;
     setDate(val);
-    if (val) {
-      const parsedYear = new Date(val).getFullYear();
+    if (val && /^\d{4}/.test(val)) {
+      const parsedYear = parseInt(val.split('-')[0], 10);
       if (!isNaN(parsedYear)) {
         setYear(parsedYear);
       }
@@ -64,18 +386,25 @@ export const NewVerification = () => {
     }
   };
 
+  // Effective unit id (falls back to user's assigned unit or default Homagama unit)
+  const effectiveUnitId = selectedUnitId || user?.units?.[0]?.id || '11111111-1111-1111-1111-111111111145';
+
   // Location display string
   const locationDisplay = selectedUnit?.unit_name
     ? `${selectedUnit.unit_name}${selectedUnit.unit_code ? ` (${selectedUnit.unit_code})` : ''}`
     : 'All Units (CSC_HOMAGAMA)';
 
-  // Load items or existing verification record
+  // Load items or existing verification record and merge active draft if present
   const loadInitialData = async () => {
     setLoading(true);
     setErrors({});
     try {
+      // Always fetch existing issued/destroyed records for status calculation
+      const idRes = await api.get('/verifications/issued-destroyed', { unit_id: effectiveUnitId }).catch(() => null);
+      setIssuedDestroyedRecords(idRes?.success && Array.isArray(idRes.data) ? idRes.data : []);
+
       if (editId) {
-        // Loading existing verification (e.g. view from history or edit)
+        // Loading existing verification (e.g. view from history)
         const res = await api.get(`/verifications/${editId}`);
         if (res.success && res.data) {
           const v = res.data;
@@ -90,20 +419,55 @@ export const NewVerification = () => {
           setVerifier2(v.verifier_2 || vList[1] || '');
           setVerifier3(v.verifier_3 || vList[2] || '');
 
-          const loadedItems = (v.items || []).map(item => ({
-            id: item.id,
-            item_code: item.item_code || '',
-            item_name: item.item_name || '',
-            category: item.category || 'General',
-            system_qty: Number(item.system_qty || 0),
-            physical_qty: item.physical_qty !== null && item.physical_qty !== undefined ? item.physical_qty : '',
-            difference: item.difference !== undefined ? item.difference : null,
-            condition: item.condition || '—',
-            label_no: item.label_no || '',
-            remarks: item.remarks || '',
-            status: item.status || 'Not Counted'
-          }));
+          const snapshots = {};
+          const loadedItems = (v.items || []).map(item => {
+            const serials = (Array.isArray(item.serial_numbers) && item.serial_numbers.length > 0)
+              ? item.serial_numbers
+              : (item.item_code ? [item.item_code] : []);
+            const mfgs = (Array.isArray(item.manufacturer_serial_numbers) && item.manufacturer_serial_numbers.length > 0)
+              ? item.manufacturer_serial_numbers
+              : (item.manufacturer_sn ? [item.manufacturer_sn] : []);
+
+            const itemId = item.item_id || item.id;
+            const issuedDestroyedVal = item.issued_destroyed || item.disposition || '—';
+            const issuedDestroyedQtyVal = (issuedDestroyedVal === 'Issued' || issuedDestroyedVal === 'Destroyed')
+              ? (item.issued_destroyed_qty !== null && item.issued_destroyed_qty !== undefined ? Number(item.issued_destroyed_qty) : 1)
+              : null;
+
+            snapshots[itemId] = {
+              physical_qty: item.physical_qty !== null && item.physical_qty !== undefined ? item.physical_qty : '',
+              condition: item.condition || '—',
+              issued_destroyed: issuedDestroyedVal,
+              issued_destroyed_qty: issuedDestroyedQtyVal,
+              label_no: item.label_no || '',
+              remarks: item.remarks || ''
+            };
+
+            return {
+              id: item.id,
+              inventory_item_id: item.item_id || null,
+              item_code: item.item_code || (serials[0] || ''),
+              serial_numbers: serials,
+              manufacturer_sn: item.manufacturer_sn || (mfgs[0] || ''),
+              manufacturer_serial_numbers: mfgs,
+              is_batch: Boolean(item.is_batch) || serials.length > 1,
+              item_name: item.item_name || '',
+              category: item.category || 'General',
+              sub_type: item.sub_type || '',
+              system_qty: Number(item.system_qty || 0),
+              physical_qty: item.physical_qty !== null && item.physical_qty !== undefined ? item.physical_qty : '',
+              difference: item.difference !== undefined ? item.difference : null,
+              condition: item.condition || '—',
+              issued_destroyed: issuedDestroyedVal,
+              issued_destroyed_qty: issuedDestroyedQtyVal,
+              issued_destroyed_id: item.issued_destroyed_id || null,
+              label_no: item.label_no || '',
+              remarks: item.remarks || '',
+              status: item.status || 'Not Counted'
+            };
+          });
           setItems(loadedItems);
+          setSavedSnapshots(snapshots);
 
           if (v.status === 'confirmed') {
             setIsExistingConfirmed(true);
@@ -111,43 +475,187 @@ export const NewVerification = () => {
           }
         }
       } else {
-        // New verification: fetch remaining items for active unit
-        const unitRes = await api.get('/transactions/remaining', { unit_id: selectedUnitId });
-        if (unitRes.success && Array.isArray(unitRes.data)) {
-          const initialItems = unitRes.data.map(r => {
-            const rawCode = (r.item_code || r.item_name || 'ITEM').replace(/[^a-zA-Z0-9]/g, '');
-            const codeSuffix = rawCode.substring(0, 4).toUpperCase();
-            return {
-              id: r.item_id || r.id,
-              item_code: r.item_code || `IT-${codeSuffix}`,
-              item_name: r.item_name || 'Unnamed Item',
-              category: r.category || 'General',
-              system_qty: Number(r.remaining_qty) || Number(r.quantity) || 0,
-              physical_qty: '',
-              difference: null,
-              condition: '—',
-              label_no: '',
-              remarks: '',
-              status: 'Not Counted'
-            };
-          });
-          setItems(initialItems);
+        // New verification: 1. Fetch inventory items for active unit
+        const [unitRes, draftRes] = await Promise.all([
+          api.get('/verifications/inventory-items', { unit_id: effectiveUnitId }),
+          api.get('/verifications/draft', { unit_id: effectiveUnitId }).catch(() => null)
+        ]);
+
+        let baseItems = [];
+        if (unitRes?.success && Array.isArray(unitRes.data)) {
+          baseItems = unitRes.data.map((r, idx) => ({
+            id: r.id || `inv-${idx}-${r.inventory_item_id}`,
+            inventory_item_id: r.inventory_item_id || r.item_id,
+            item_code: r.item_code || '',
+            serial_numbers: Array.isArray(r.serial_numbers) ? r.serial_numbers : (r.item_code ? [r.item_code] : []),
+            manufacturer_sn: r.manufacturer_sn || '',
+            manufacturer_serial_numbers: Array.isArray(r.manufacturer_serial_numbers) ? r.manufacturer_serial_numbers : (r.manufacturer_sn ? [r.manufacturer_sn] : []),
+            is_batch: Boolean(r.is_batch),
+            item_name: r.item_name || 'Unnamed Item',
+            category: r.category || 'General',
+            sub_type: r.sub_type || '',
+            system_qty: Number(r.system_qty || 0),
+            physical_qty: '',
+            difference: null,
+            condition: '—',
+            issued_destroyed: '—',
+            issued_destroyed_qty: null,
+            issued_destroyed_id: null,
+            label_no: '',
+            remarks: '',
+            status: 'Not Counted'
+          }));
         }
+
+        // 2. Merge draft items if active draft exists
+        const draft = draftRes?.data;
+        const snapshots = {};
+
+        if (draft && draft.id) {
+          setDraftInfo({
+            id: draft.id,
+            updated_at: draft.updated_at,
+            savedCount: (draft.items || []).length
+          });
+
+          if (draft.date) setDate(draft.date);
+          if (draft.year) setYear(draft.year);
+          if (draft.verifier_1) setVerifier1(draft.verifier_1);
+          if (draft.verifier_2) setVerifier2(draft.verifier_2);
+          if (draft.verifier_3) setVerifier3(draft.verifier_3);
+
+          const draftItemsMap = new Map((draft.items || []).map(it => [it.item_id, it]));
+
+          baseItems = baseItems.map(row => {
+            const itemId = row.inventory_item_id;
+            if (draftItemsMap.has(itemId)) {
+              const dItem = draftItemsMap.get(itemId);
+              const phys = dItem.physical_qty !== null && dItem.physical_qty !== undefined ? dItem.physical_qty : '';
+              const cond = dItem.condition || '—';
+              const issuedDestroyed = dItem.issued_destroyed || dItem.disposition || '—';
+              const issuedDestroyedQty = (issuedDestroyed === 'Issued' || issuedDestroyed === 'Destroyed')
+                ? (dItem.issued_destroyed_qty !== null && dItem.issued_destroyed_qty !== undefined ? Number(dItem.issued_destroyed_qty) : 1)
+                : null;
+              const label = dItem.label_no || '';
+              const rem = dItem.remarks || '';
+
+              snapshots[itemId] = {
+                physical_qty: phys,
+                condition: cond,
+                issued_destroyed: issuedDestroyed,
+                issued_destroyed_qty: issuedDestroyedQty,
+                label_no: label,
+                remarks: rem
+              };
+
+              return {
+                ...row,
+                physical_qty: phys,
+                difference: dItem.difference !== undefined ? dItem.difference : null,
+                condition: cond,
+                issued_destroyed: issuedDestroyed,
+                issued_destroyed_qty: issuedDestroyedQty,
+                issued_destroyed_id: dItem.issued_destroyed_id || null,
+                label_no: label,
+                remarks: rem,
+                status: dItem.status || 'Not Counted'
+              };
+            }
+            return row;
+          });
+        } else {
+          setDraftInfo(null);
+        }
+
+        setItems(baseItems);
+        setSavedSnapshots(snapshots);
       }
     } catch (err) {
       console.error('Failed to load verification items:', err);
       toast.error('Failed to initialize verification items.');
     } finally {
       setLoading(false);
+      if (tableContainerRef.current) {
+        tableContainerRef.current.scrollLeft = 0;
+      }
     }
   };
 
   useEffect(() => {
+    setSearchQuery('');
+    setSelectedCategoryFilter('');
     loadInitialData();
-  }, [editId, selectedUnitId]);
+  }, [editId, effectiveUnitId]);
+
+  // Distinct categories for filter dropdown
+  const distinctCategories = useMemo(() => {
+    const set = new Set();
+    items.forEach(i => {
+      if (i.category && i.category.trim()) {
+        set.add(i.category.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [items]);
+
+  // Dirty count and unsaved changes check
+  const dirtyRows = useMemo(() => {
+    return items.filter(row => {
+      const itemId = row.inventory_item_id || row.item_id || row.id;
+      return isRowDirty(row, savedSnapshots[itemId]);
+    });
+  }, [items, savedSnapshots]);
+
+  const hasUnsavedChanges = dirtyRows.length > 0;
+
+  // Window beforeunload guard
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved rows. Save them first or leave?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Filtered view of items (retains originalIndex to allow in-place editing)
+  const filteredItems = useMemo(() => {
+    return items
+      .map((item, originalIndex) => ({ ...item, originalIndex }))
+      .filter(row => {
+        if (selectedCategoryFilter && (row.category || '').toLowerCase() !== selectedCategoryFilter.toLowerCase()) {
+          return false;
+        }
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          const serialMatch = (row.item_code || '').toLowerCase().includes(q);
+          const anySerialMatch = Array.isArray(row.serial_numbers) && row.serial_numbers.some(s => s && s.toLowerCase().includes(q));
+          const nameMatch = (row.item_name || '').toLowerCase().includes(q);
+          const mfgMatch = (row.manufacturer_sn || '').toLowerCase().includes(q);
+          const anyMfgMatch = Array.isArray(row.manufacturer_serial_numbers) && row.manufacturer_serial_numbers.some(m => m && m.toLowerCase().includes(q));
+          if (!serialMatch && !anySerialMatch && !nameMatch && !mfgMatch && !anyMfgMatch) return false;
+        }
+        return true;
+      });
+  }, [items, selectedCategoryFilter, searchQuery]);
+
+  // Recorded quantities map from active unit's existing Issued / Destroyed records
+  const recordedQtyMap = useMemo(() => {
+    const map = {};
+    (issuedDestroyedRecords || []).forEach(rec => {
+      const itemId = rec.item_id;
+      if (itemId) {
+        map[itemId] = (map[itemId] || 0) + (Number(rec.quantity) || 0);
+      }
+    });
+    return map;
+  }, [issuedDestroyedRecords]);
 
   // Handle line item field changes
-  const handleItemFieldChange = (index, field, value) => {
+  const handleItemFieldChange = useCallback((index, field, value) => {
     setItems(prev => {
       const copy = [...prev];
       const target = { ...copy[index], [field]: value };
@@ -170,6 +678,16 @@ export const NewVerification = () => {
         }
       }
 
+      if (field === 'issued_destroyed_qty') {
+        const valStr = String(value).trim();
+        if (valStr === '') {
+          target.issued_destroyed_qty = '';
+        } else {
+          const parsed = parseInt(valStr, 10);
+          target.issued_destroyed_qty = isNaN(parsed) ? '' : Math.max(1, Math.min(Number(target.system_qty || 1), parsed));
+        }
+      }
+
       copy[index] = target;
       return copy;
     });
@@ -177,12 +695,227 @@ export const NewVerification = () => {
     if (errors.items) {
       setErrors(prev => ({ ...prev, items: null }));
     }
+  }, [errors.items]);
+
+  // Per-row Save Handler
+  const handleSaveRow = useCallback(async (originalIndex, row) => {
+    if (isReadOnly) return;
+    const itemId = row.inventory_item_id || row.item_id || row.id;
+    if (!itemId) return;
+
+    if (row.physical_qty !== '' && row.physical_qty !== null && Number(row.physical_qty) < 0) {
+      toast.error('Physical quantity cannot be negative.');
+      return;
+    }
+
+    if (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') {
+      const q = Number(row.issued_destroyed_qty);
+      if (!row.issued_destroyed_qty || isNaN(q) || q < 1 || q > Number(row.system_qty || 1)) {
+        toast.error(`Issued/Destroyed quantity for "${row.item_name}" must be between 1 and ${row.system_qty || 1}.`);
+        return;
+      }
+    }
+
+    const issuedDestroyedQtyToSave = (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed')
+      ? Number(row.issued_destroyed_qty || 1)
+      : null;
+
+    setSavingRows(prev => ({ ...prev, [itemId]: true }));
+    try {
+      const res = await api.put(`/verifications/draft/items/${itemId}`, {
+        unit_id: effectiveUnitId,
+        rowData: {
+          item_id: itemId,
+          inventory_item_id: row.inventory_item_id,
+          item_name: row.item_name,
+          category: row.category,
+          sub_type: row.sub_type,
+          item_code: row.item_code,
+          serial_numbers: row.serial_numbers,
+          manufacturer_sn: row.manufacturer_sn,
+          manufacturer_serial_numbers: row.manufacturer_serial_numbers,
+          is_batch: row.is_batch,
+          system_qty: row.system_qty,
+          physical_qty: row.physical_qty,
+          condition: row.condition,
+          issued_destroyed: row.issued_destroyed,
+          issued_destroyed_qty: issuedDestroyedQtyToSave,
+          issued_destroyed_id: row.issued_destroyed_id,
+          label_no: row.label_no,
+          remarks: row.remarks,
+          status: row.status
+        },
+        headerData: {
+          date,
+          year: Number(year),
+          verifier_1: verifier1.trim(),
+          verifier_2: verifier2.trim(),
+          verifier_3: verifier3.trim()
+        }
+      });
+
+      if (res.success) {
+        setSavedSnapshots(prev => ({
+          ...prev,
+          [itemId]: {
+            physical_qty: row.physical_qty,
+            condition: row.condition,
+            issued_destroyed: row.issued_destroyed,
+            issued_destroyed_qty: issuedDestroyedQtyToSave,
+            label_no: row.label_no,
+            remarks: row.remarks
+          }
+        }));
+        setDraftInfo(prev => ({
+          id: res.data?.draft?.id || prev?.id,
+          updated_at: res.data?.draft?.updated_at || new Date().toISOString(),
+          savedCount: (prev?.savedCount || 0) + (savedSnapshots[itemId] ? 0 : 1)
+        }));
+        toast.success(`Saved "${row.item_name}" to draft.`);
+      }
+    } catch (err) {
+      console.error('Failed to save row to draft:', err);
+      toast.error(err.message || 'Failed to save row to draft.');
+    } finally {
+      setSavingRows(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    }
+  }, [isReadOnly, effectiveUnitId, date, year, verifier1, verifier2, verifier3, savedSnapshots, toast]);
+
+  // Issued / Destroyed Selection Handler (No popup, no auto-navigate, just updates state)
+  const handleIssuedDestroyedSelect = useCallback((originalIndex, row, value) => {
+    if (isReadOnly) return;
+    const isMarked = value === 'Issued' || value === 'Destroyed';
+    const defaultQty = isMarked ? (Number(row.issued_destroyed_qty) || 1) : null;
+
+    setItems(prev => {
+      const copy = [...prev];
+      copy[originalIndex] = {
+        ...copy[originalIndex],
+        issued_destroyed: value,
+        issued_destroyed_qty: defaultQty
+      };
+      return copy;
+    });
+
+    if (errors.items) {
+      setErrors(prev => ({ ...prev, items: null }));
+    }
+  }, [isReadOnly, errors.items]);
+
+  // Save All Unsaved Rows
+  const handleSaveAll = async () => {
+    if (isReadOnly) return;
+    if (dirtyRows.length === 0) {
+      toast.info('No unsaved changes to save.');
+      return;
+    }
+
+    // Validate rows
+    for (const row of dirtyRows) {
+      if (row.physical_qty !== '' && row.physical_qty !== null && Number(row.physical_qty) < 0) {
+        toast.error(`Physical quantity cannot be negative for ${row.item_name}.`);
+        return;
+      }
+      if (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') {
+        const q = Number(row.issued_destroyed_qty);
+        if (!row.issued_destroyed_qty || isNaN(q) || q < 1 || q > Number(row.system_qty || 1)) {
+          toast.error(`Issued/Destroyed quantity for "${row.item_name}" must be between 1 and ${row.system_qty || 1}.`);
+          return;
+        }
+      }
+    }
+
+    setIsSavingAll(true);
+    try {
+      const res = await api.post('/verifications/draft/save-all', {
+        unit_id: effectiveUnitId,
+        items: dirtyRows.map(row => ({
+          item_id: row.inventory_item_id || row.item_id || row.id,
+          inventory_item_id: row.inventory_item_id,
+          item_name: row.item_name,
+          category: row.category,
+          sub_type: row.sub_type,
+          item_code: row.item_code,
+          serial_numbers: row.serial_numbers,
+          manufacturer_sn: row.manufacturer_sn,
+          manufacturer_serial_numbers: row.manufacturer_serial_numbers,
+          is_batch: row.is_batch,
+          system_qty: row.system_qty,
+          physical_qty: row.physical_qty,
+          condition: row.condition,
+          issued_destroyed: row.issued_destroyed,
+          issued_destroyed_qty: (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') ? Number(row.issued_destroyed_qty || 1) : null,
+          issued_destroyed_id: row.issued_destroyed_id,
+          label_no: row.label_no,
+          remarks: row.remarks,
+          status: row.status
+        })),
+        headerData: {
+          date,
+          year: Number(year),
+          verifier_1: verifier1.trim(),
+          verifier_2: verifier2.trim(),
+          verifier_3: verifier3.trim()
+        }
+      });
+
+      if (res.success) {
+        const newSnapshots = { ...savedSnapshots };
+        dirtyRows.forEach(row => {
+          const itemId = row.inventory_item_id || row.item_id || row.id;
+          newSnapshots[itemId] = {
+            physical_qty: row.physical_qty,
+            condition: row.condition,
+            issued_destroyed: row.issued_destroyed,
+            issued_destroyed_qty: (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') ? Number(row.issued_destroyed_qty || 1) : null,
+            label_no: row.label_no,
+            remarks: row.remarks
+          };
+        });
+        setSavedSnapshots(newSnapshots);
+        setDraftInfo(prev => ({
+          id: res.data?.draft?.id || prev?.id,
+          updated_at: res.data?.draft?.updated_at || new Date().toISOString(),
+          savedCount: Object.keys(newSnapshots).length
+        }));
+        toast.success(`${res.data?.savedCount || dirtyRows.length} rows saved to draft.`);
+      }
+    } catch (err) {
+      console.error('Failed to save all dirty items:', err);
+      toast.error(err.message || 'Failed to save items to draft.');
+    } finally {
+      setIsSavingAll(false);
+    }
+  };
+
+  // Discard draft confirmation handler
+  const handleConfirmDiscardDraft = async () => {
+    setIsDiscarding(true);
+    try {
+      const res = await api.delete('/verifications/draft', { unit_id: effectiveUnitId });
+      if (res.success) {
+        toast.success('Draft verification discarded.');
+        setDraftInfo(null);
+        setSavedSnapshots({});
+        setIsDiscardModalOpen(false);
+        await loadInitialData();
+      }
+    } catch (err) {
+      console.error('Failed to discard draft:', err);
+      toast.error(err.message || 'Failed to discard draft.');
+    } finally {
+      setIsDiscarding(false);
+    }
   };
 
   // Prompt remove row confirmation modal
-  const handlePromptRemoveRow = (index, item) => {
+  const handlePromptRemoveRow = useCallback((index, item) => {
     setItemToRemove({ index, item });
-  };
+  }, []);
 
   // Confirmed removal of line item
   const handleConfirmRemoveRow = () => {
@@ -221,6 +954,17 @@ export const NewVerification = () => {
       if (!hasAtLeastOneCounted) {
         newErrors.items = 'At least one item must have a Physical Quantity entered before proceeding.';
       }
+
+      // Check Issued / Destroyed quantities
+      for (const item of items) {
+        if (item.issued_destroyed === 'Issued' || item.issued_destroyed === 'Destroyed') {
+          const q = Number(item.issued_destroyed_qty);
+          if (!item.issued_destroyed_qty || isNaN(q) || q < 1 || q > Number(item.system_qty || 1)) {
+            newErrors.items = `Please specify a valid quantity (1 to ${item.system_qty || 1}) for ${item.item_name} marked as ${item.issued_destroyed}.`;
+            break;
+          }
+        }
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -244,7 +988,7 @@ export const NewVerification = () => {
     setSubmitting(true);
     try {
       const payload = {
-        unit_id: selectedUnitId || user?.units?.[0]?.id || '11111111-1111-1111-1111-111111111145',
+        unit_id: effectiveUnitId,
         date,
         year: Number(year),
         verifier_1: verifier1.trim(),
@@ -268,13 +1012,21 @@ export const NewVerification = () => {
           }
 
           return {
-            item_code: item.item_code,
+            item_id: item.inventory_item_id || item.item_id || (typeof item.id === 'string' && item.id.match(/^[0-9a-f-]{36}$/i) ? item.id : null),
+            item_code: item.item_code || (item.serial_numbers && item.serial_numbers[0]) || '',
+            serial_numbers: Array.isArray(item.serial_numbers) ? item.serial_numbers : (item.item_code ? [item.item_code] : []),
+            manufacturer_sn: item.manufacturer_sn || (item.manufacturer_serial_numbers && item.manufacturer_serial_numbers[0]) || '',
+            manufacturer_serial_numbers: Array.isArray(item.manufacturer_serial_numbers) ? item.manufacturer_serial_numbers : (item.manufacturer_sn ? [item.manufacturer_sn] : []),
+            is_batch: Boolean(item.is_batch) || (Array.isArray(item.serial_numbers) && item.serial_numbers.length > 1),
             item_name: item.item_name,
             category: item.category,
             system_qty: sys,
             physical_qty: phys,
             difference: diff,
             condition: item.condition && item.condition !== '—' ? item.condition : 'Good',
+            issued_destroyed: item.issued_destroyed && item.issued_destroyed !== '—' ? item.issued_destroyed : '',
+            issued_destroyed_qty: (item.issued_destroyed === 'Issued' || item.issued_destroyed === 'Destroyed') ? Number(item.issued_destroyed_qty || 1) : null,
+            issued_destroyed_id: item.issued_destroyed_id || null,
             label_no: item.label_no || '',
             remarks: item.remarks || '',
             status,
@@ -297,8 +1049,16 @@ export const NewVerification = () => {
   };
 
   const handleCancel = () => {
-    navigate('/verification');
+    if (draftInfo) {
+      setIsCancelDraftModalOpen(true);
+    } else if (hasUnsavedChanges) {
+      setIsUnsavedLeaveModalOpen(true);
+    } else {
+      navigate('/verification');
+    }
   };
+
+  const savedItemsCount = Object.keys(savedSnapshots).length;
 
   return (
     <AppShell
@@ -331,7 +1091,7 @@ export const NewVerification = () => {
             </div>
             <div>
               <span className="font-bold text-slate uppercase block">Verification Date</span>
-              <span className="font-semibold text-ink">{date}</span>
+              <span className="font-semibold text-ink">{formatDate(date)}</span>
             </div>
             <div>
               <span className="font-bold text-slate uppercase block">Audit Year</span>
@@ -348,114 +1108,236 @@ export const NewVerification = () => {
       </div>
 
       {/* Main Page Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 no-print">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3.5 no-print">
         <div>
           <h1 className="text-xl font-semibold text-ink tracking-tight">New Verification</h1>
         </div>
       </div>
 
+      {/* Draft Continuation Banner */}
+      {draftInfo && currentStep === 1 && (
+        <div className="mb-3.5 bg-[#1C355E]/5 border border-signal/20 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-subtle no-print">
+          <div className="flex items-center gap-2.5 text-xs text-ink">
+            <div className="w-6 h-6 rounded-full bg-signal/15 text-signal flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <span className="font-semibold text-ink">Continuing your saved draft</span>
+              {draftInfo.updated_at && (
+                <span className="text-slate"> (last saved {formatDateTime(draftInfo.updated_at)})</span>
+              )}
+              <span className="text-slate">. <strong className="text-ink">{savedItemsCount}</strong> of <strong className="text-ink">{items.length}</strong> items saved.</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsDiscardModalOpen(true)}
+            disabled={isReadOnly}
+            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-[#B4483A] bg-[#B4483A]/10 hover:bg-[#B4483A]/15 border border-[#B4483A]/20 rounded-lg transition-colors cursor-pointer self-start sm:self-auto shrink-0 disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Discard draft</span>
+          </button>
+        </div>
+      )}
+
       {/* ========================================================================= */}
-      {/* STEP 1: VERIFICATION ENTRY FORM (Screenshots 1, 2, 5)                      */}
+      {/* STEP 1: VERIFICATION ENTRY FORM                                           */}
       {/* ========================================================================= */}
       {currentStep === 1 && (
-        <div className="space-y-6">
-          {/* Top Form Card */}
-          <div className="bg-card border border-line rounded-xl p-5 shadow-card space-y-4">
-            {/* 1. LOCATION (read-only, greyed, with map-pin icon) */}
-            <div>
-              <label className="block text-[11px] font-semibold text-slate uppercase tracking-wider mb-1.5">
-                Location
-              </label>
-              <div className="bg-[#F1F3F5] text-slate border border-line rounded-lg py-2.5 px-3 flex items-center gap-2 cursor-not-allowed select-none text-xs font-medium">
-                <MapPin className="w-4 h-4 text-slate shrink-0" />
-                <span className="truncate">{locationDisplay}</span>
-              </div>
-            </div>
+        <div className="space-y-3.5">
+          {/* Top Compact Information Card + Integrated Filter Bar */}
+          <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
+            {/* Top Details Section (2 compact rows) */}
+            <div className="p-3.5 sm:p-4 space-y-3">
+              {/* Row 1: Location | Date * | Year */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_100px] gap-3 items-start">
+                {/* Location Chip */}
+                <div className="sm:col-span-2 lg:col-span-1">
+                  <label className="block text-[10px] font-semibold text-slate uppercase tracking-wider mb-1">
+                    Location
+                  </label>
+                  <div
+                    className="h-9 bg-[#F1F3F5] text-slate border border-line rounded-lg px-2.5 flex items-center gap-2 cursor-default select-none text-xs font-medium"
+                    title={locationDisplay}
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-slate shrink-0" />
+                    <span className="truncate">{locationDisplay}</span>
+                  </div>
+                </div>
 
-            {/* 2. Date & Year */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate uppercase tracking-wider mb-1.5">
-                  Date <span className="text-[#B4483A]">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="date"
+                {/* Date Input */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate uppercase tracking-wider mb-1">
+                    Date <span className="text-[#B4483A]">*</span>
+                  </label>
+                  <DateInput
                     required
+                    tabIndex={1}
                     value={date}
                     onChange={handleDateChange}
-                    className={`w-full bg-surface border ${
-                      errors.date ? 'border-[#B4483A] ring-1 ring-[#B4483A]/30' : 'border-line'
-                    } rounded-lg py-2 px-3 text-xs text-ink focus:outline-none focus:border-signal transition-colors font-mono`}
+                    error={errors.date}
+                    placeholder="dd/mm/yyyy"
+                    disabled={isReadOnly}
+                    className="h-9 text-xs"
                   />
                 </div>
-                {errors.date && (
-                  <p className="text-[11px] text-[#B4483A] font-medium mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>{errors.date}</span>
-                  </p>
-                )}
+
+                {/* Year Input (Read-only, auto-calculated from Date) */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate uppercase tracking-wider mb-1">
+                    Year
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    tabIndex={-1}
+                    value={year || ''}
+                    title="Cycle year derived automatically from verification date"
+                    className="w-full h-9 bg-[#F1F3F5] text-slate border border-line rounded-lg px-3 text-xs font-mono font-medium cursor-default focus:outline-none"
+                  />
+                </div>
               </div>
 
+              {/* Row 2: Verified By * (3 compact inputs side by side) */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate uppercase tracking-wider mb-1.5">
-                  Year
+                <label className="block text-[10px] font-semibold text-slate uppercase tracking-wider mb-1">
+                  Verified By <span className="text-[#B4483A]">*</span>
                 </label>
-                <input
-                  type="number"
-                  value={year}
-                  onChange={(e) => setYear(Number(e.target.value) || '')}
-                  className="w-full bg-surface border border-line rounded-lg py-2 px-3 text-xs text-ink focus:outline-none focus:border-signal font-mono font-medium"
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      tabIndex={2}
+                      placeholder="Verifier 1 name *"
+                      value={verifier1}
+                      disabled={isReadOnly}
+                      onChange={(e) => {
+                        setVerifier1(e.target.value);
+                        if (errors.verifier1) setErrors(prev => ({ ...prev, verifier1: null }));
+                      }}
+                      className={`w-full h-9 bg-card border ${
+                        errors.verifier1 ? 'border-[#B4483A] ring-1 ring-[#B4483A]/30' : 'border-line hover:border-slate/50'
+                      } rounded-lg px-3 text-xs text-ink placeholder-slate/70 focus:outline-none focus:border-signal transition-colors disabled:opacity-60`}
+                    />
+                    {errors.verifier1 && (
+                      <p className="text-[11px] text-[#B4483A] font-medium mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{errors.verifier1}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <input
+                      type="text"
+                      tabIndex={3}
+                      placeholder="Verifier 2 name (optional)"
+                      value={verifier2}
+                      disabled={isReadOnly}
+                      onChange={(e) => setVerifier2(e.target.value)}
+                      className="w-full h-9 bg-card border border-line hover:border-slate/50 rounded-lg px-3 text-xs text-ink placeholder-slate/70 focus:outline-none focus:border-signal transition-colors disabled:opacity-60"
+                    />
+                  </div>
+
+                  <div>
+                    <input
+                      type="text"
+                      tabIndex={4}
+                      placeholder="Verifier 3 name (optional)"
+                      value={verifier3}
+                      disabled={isReadOnly}
+                      onChange={(e) => setVerifier3(e.target.value)}
+                      className="w-full h-9 bg-card border border-line hover:border-slate/50 rounded-lg px-3 text-xs text-ink placeholder-slate/70 focus:outline-none focus:border-signal transition-colors disabled:opacity-60"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* 3. Verified By (3 text input boxes side by side) */}
-            <div>
-              <label className="block text-[11px] font-semibold text-slate uppercase tracking-wider mb-1.5">
-                Verified By <span className="text-[#B4483A]">*</span>
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
+            {/* Integrated Slim Filter Toolbar */}
+            <div className="border-t border-line/70 bg-surface/30 px-3.5 sm:px-4 py-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                {/* Category Filter Dropdown */}
+                <div className="relative min-w-[160px] sm:w-48">
+                  <select
+                    value={selectedCategoryFilter}
+                    onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                    className="w-full h-8.5 text-xs bg-card border border-line rounded-lg py-1 pl-2.5 pr-7 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
+                  >
+                    <option value="">All Categories</option>
+                    {distinctCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
+                </div>
+
+                {/* Free-text Search Box */}
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate" />
                   <input
                     type="text"
-                    required
-                    placeholder="Verifier 1 name"
-                    value={verifier1}
-                    onChange={(e) => {
-                      setVerifier1(e.target.value);
-                      if (errors.verifier1) setErrors(prev => ({ ...prev, verifier1: null }));
-                    }}
-                    className={`w-full bg-surface border ${
-                      errors.verifier1 ? 'border-[#B4483A] ring-1 ring-[#B4483A]/30' : 'border-line'
-                    } rounded-lg py-2 px-3 text-xs text-ink placeholder-slate focus:outline-none focus:border-signal transition-colors`}
+                    placeholder="Search serial no. or item name..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full h-8.5 pl-8 pr-7 py-1 text-xs bg-card border border-line rounded-lg focus:outline-none focus:border-signal text-ink placeholder-slate/70 shadow-subtle"
                   />
-                  {errors.verifier1 && (
-                    <p className="text-[11px] text-[#B4483A] font-medium mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      <span>{errors.verifier1}</span>
-                    </p>
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate hover:text-ink p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
 
-                <div>
-                  <input
-                    type="text"
-                    placeholder="Verifier 2 name"
-                    value={verifier2}
-                    onChange={(e) => setVerifier2(e.target.value)}
-                    className="w-full bg-surface border border-line rounded-lg py-2 px-3 text-xs text-ink placeholder-slate focus:outline-none focus:border-signal"
-                  />
-                </div>
+                {/* Reset Filters */}
+                {(selectedCategoryFilter || searchQuery) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryFilter('');
+                      setSearchQuery('');
+                    }}
+                    className="inline-flex items-center gap-1 text-xs text-[#B4483A] hover:underline font-medium px-1.5 py-1 transition-colors"
+                    title="Reset filters"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Items Counter + "Save all" Button */}
+              <div className="flex items-center gap-3 text-xs text-slate shrink-0">
+                {dirtyRows.length > 0 && !isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={handleSaveAll}
+                    disabled={isSavingAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-white bg-signal hover:bg-[#1f406b] rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                    title="Save all unsaved rows to draft"
+                  >
+                    {isSavingAll ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                    <span>Save all ({dirtyRows.length})</span>
+                  </button>
+                )}
 
                 <div>
-                  <input
-                    type="text"
-                    placeholder="Verifier 3 name"
-                    value={verifier3}
-                    onChange={(e) => setVerifier3(e.target.value)}
-                    className="w-full bg-surface border border-line rounded-lg py-2 px-3 text-xs text-ink placeholder-slate focus:outline-none focus:border-signal"
-                  />
+                  Showing <span className="font-semibold text-ink">{filteredItems.length}</span> items
+                  {items.length !== filteredItems.length && (
+                    <span className="text-slate/60"> (of {items.length} total)</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -463,150 +1345,88 @@ export const NewVerification = () => {
 
           {/* Inline Validation Banner if row verification criteria is not satisfied */}
           {errors.items && (
-            <div className="p-3 bg-[#B4483A]/10 border border-[#B4483A]/30 text-[#B4483A] text-xs font-medium rounded-lg flex items-center gap-2">
+            <div className="p-2.5 bg-[#B4483A]/10 border border-[#B4483A]/30 text-[#B4483A] text-xs font-medium rounded-lg flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errors.items}</span>
             </div>
           )}
 
-          {/* Verification Table */}
+          {/* Verification Table with Sticky No & Serial No Columns & Contained Scroll */}
           <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-ink border-collapse">
-                <thead>
-                  <tr className="border-b border-line bg-surface/70 font-semibold text-slate uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-3 w-12 text-center">No</th>
-                    <th className="py-3 px-3 whitespace-nowrap">Serial No.</th>
-                    <th className="py-3 px-4 min-w-[180px]">Item</th>
-                    <th className="py-3 px-3 min-w-[130px]">Category</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">System Qty</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">Physical Qty</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">Difference</th>
-                    <th className="py-3 px-3 whitespace-nowrap">Condition</th>
-                    <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Label No</th>
-                    <th className="py-3 px-4 min-w-[160px]">Remarks</th>
-                    <th className="py-3 px-2 w-10 text-center"></th>
+            <div
+              ref={tableContainerRef}
+              className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto"
+            >
+              <table className="w-full min-w-[1550px] text-left text-xs text-ink border-collapse table-auto">
+                <thead className="sticky top-0 z-30 bg-surface border-b border-line shadow-xs">
+                  <tr className="bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
+                    {/* Column 1: No (Plain table cell) */}
+                    <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60">
+                      No
+                    </th>
+                    {/* Column 2: Serial No (Plain table cell, w-[420px] min-w-[400px]) */}
+                    <th className="py-2.5 px-3 w-[420px] min-w-[400px] border-r border-line">
+                      Serial No.
+                    </th>
+                    <th className="py-2.5 px-4 min-w-[170px]">Item</th>
+                    <th className="py-2.5 px-3 min-w-[130px]">Category</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">System Qty</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[85px]">Physical Qty</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">Difference</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[105px]">Condition</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[210px] w-[220px]">Issued / Destroyed</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[95px]">Label No</th>
+                    <th className="py-2.5 px-4 min-w-[140px]">Remarks</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[120px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
                   {loading ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center text-slate">
+                      <td colSpan={12} className="py-12 text-center text-slate">
                         <div className="inline-block w-6 h-6 border-2 border-line border-t-ink rounded-full animate-spin mb-2"></div>
                         <div>Loading unit inventory items...</div>
                       </td>
                     </tr>
                   ) : items.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center text-slate">
+                      <td colSpan={12} className="py-12 text-center text-slate">
                         <div className="text-sm font-medium text-ink">No inventory items found for this unit.</div>
-                        <p className="text-xs mt-1 text-slate">Items will appear once recorded in received transactions.</p>
+                        <p className="text-xs mt-1 text-slate">Add items from Inventory &gt; Item Categories first.</p>
+                      </td>
+                    </tr>
+                  ) : filteredItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="py-12 text-center text-slate">
+                        <div className="text-sm font-medium text-ink">No matching items found.</div>
+                        <p className="text-xs mt-1 text-slate">Try adjusting your category filter or search query.</p>
                       </td>
                     </tr>
                   ) : (
-                    items.map((row, idx) => {
-                      const hasPhysQty = row.physical_qty !== '' && row.physical_qty !== null && !isNaN(Number(row.physical_qty));
-                      const diff = hasPhysQty ? Number(row.difference) : null;
+                    filteredItems.map((row, idx) => {
+                      const itemId = row.inventory_item_id || row.item_id || row.id;
+                      const saved = savedSnapshots[itemId];
+                      const isSaved = Boolean(saved);
+                      const isDirty = isRowDirty(row, saved);
+                      const isSaving = Boolean(savingRows[itemId]);
 
                       return (
-                        <tr key={row.id || idx} className="hover:bg-surface/50 transition-colors group">
-                          {/* 1. No */}
-                          <td className="py-3 px-3 text-center text-slate font-mono font-medium">
-                            {idx + 1}
-                          </td>
-
-                          {/* 2. Serial No. (previously Item Code) */}
-                          <td className="py-3 px-3 font-mono font-semibold text-ink whitespace-nowrap">
-                            {row.item_code || '—'}
-                          </td>
-
-                          {/* 3. Item */}
-                          <td className="py-3 px-4 font-semibold text-ink">
-                            {row.item_name}
-                          </td>
-
-                          {/* 4. Category */}
-                          <td className="py-3 px-3 text-slate">
-                            {row.category}
-                          </td>
-
-                          {/* 5. System Qty (read-only, bold) */}
-                          <td className="py-3 px-3 text-center font-bold text-ink font-mono text-sm">
-                            {row.system_qty}
-                          </td>
-
-                          {/* 6. Physical Qty (numeric input, placeholder "—") */}
-                          <td className="py-3 px-3 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="—"
-                              value={row.physical_qty ?? ''}
-                              onChange={(e) => handleItemFieldChange(idx, 'physical_qty', e.target.value)}
-                              className="w-18 px-2 py-1 text-center font-mono font-bold bg-surface border border-line rounded text-xs text-ink focus:outline-none focus:border-signal focus:ring-1 focus:ring-signal/30"
-                            />
-                          </td>
-
-                          {/* 7. Difference (auto-calculated, color-coded) */}
-                          <td className="py-3 px-3 text-center font-mono font-bold">
-                            {diff === null ? (
-                              <span className="text-slate font-normal">—</span>
-                            ) : diff === 0 ? (
-                              <span className="text-[#2F7A5C]">0</span>
-                            ) : (
-                              <span className="text-[#B4483A]">{diff > 0 ? `+${diff}` : diff}</span>
-                            )}
-                          </td>
-
-                          {/* 8. Condition (dropdown) */}
-                          <td className="py-3 px-3">
-                            <select
-                              value={row.condition || '—'}
-                              onChange={(e) => handleItemFieldChange(idx, 'condition', e.target.value)}
-                              className="bg-surface border border-line rounded px-2 py-1 text-xs text-ink focus:outline-none focus:border-signal"
-                            >
-                              {CONDITION_OPTIONS.map(opt => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-
-                          {/* 9. Label No (text input, placeholder "VL-0000") */}
-                          <td className="py-3 px-3">
-                            <input
-                              type="text"
-                              placeholder="VL-0000"
-                              value={row.label_no || ''}
-                              onChange={(e) => handleItemFieldChange(idx, 'label_no', e.target.value)}
-                              className="w-24 px-2 py-1 font-mono text-xs bg-surface border border-line rounded text-ink placeholder-slate focus:outline-none focus:border-signal"
-                            />
-                          </td>
-
-                          {/* 10. Remarks (optional text input) */}
-                          <td className="py-3 px-4">
-                            <input
-                              type="text"
-                              placeholder="Optional remarks"
-                              value={row.remarks || ''}
-                              onChange={(e) => handleItemFieldChange(idx, 'remarks', e.target.value)}
-                              className="w-full min-w-[140px] px-2 py-1 text-xs bg-surface border border-line rounded text-ink placeholder-slate focus:outline-none focus:border-signal"
-                            />
-                          </td>
-
-                          {/* 11. Row Remove "x" Button */}
-                          <td className="py-3 px-2 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handlePromptRemoveRow(idx, row)}
-                              className="p-1 text-slate hover:text-[#B4483A] rounded transition-colors"
-                              title="Remove item from verification"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
+                        <VerificationRow
+                          key={row.id || `${row.originalIndex}-${row.item_code}`}
+                          row={row}
+                          idx={idx}
+                          searchQuery={searchQuery}
+                          selectedCategoryFilter={selectedCategoryFilter}
+                          onFieldChange={handleItemFieldChange}
+                          onPromptRemove={handlePromptRemoveRow}
+                          onSaveRow={handleSaveRow}
+                          onIssuedDestroyedSelect={handleIssuedDestroyedSelect}
+                          recordedQty={recordedQtyMap[itemId] || 0}
+                          isSaving={isSaving}
+                          isDirty={isDirty}
+                          isSaved={isSaved}
+                          isReadOnly={isReadOnly}
+                        />
                       );
                     })
                   )}
@@ -615,12 +1435,12 @@ export const NewVerification = () => {
             </div>
           </div>
 
-          {/* Bottom Action Buttons (Step 1) */}
-          <div className="flex items-center justify-between pt-2">
+          {/* Bottom Action Bar (Step 1) - Sticky */}
+          <div className="sticky bottom-0 z-20 bg-background/95 backdrop-blur-sm border-t border-line py-2.5 px-4 -mx-4 sm:-mx-6 sm:px-6 flex items-center justify-between shadow-[0_-4px_12px_rgba(0,0,0,0.06)] no-print">
             <button
               type="button"
               onClick={handleCancel}
-              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs"
+              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs cursor-pointer"
             >
               Cancel
             </button>
@@ -628,7 +1448,7 @@ export const NewVerification = () => {
             <button
               type="button"
               onClick={handleSubmitToReview}
-              className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5"
+              className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span>Submit</span>
               <ChevronRight className="w-4 h-4" />
@@ -638,141 +1458,156 @@ export const NewVerification = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* STEP 2: REVIEW & CONFIRM SCREEN (Screenshots 3, 4, 6)                      */}
+      {/* STEP 2: REVIEW & CONFIRM SCREEN                                           */}
       {/* ========================================================================= */}
       {currentStep === 2 && (
-        <div className="space-y-6">
+        <div className="space-y-3.5">
           {/* Top Banner (Review & Confirm — read-only) */}
-          <div className="bg-card border border-line rounded-xl p-3.5 shadow-card flex items-center justify-center gap-2.5 text-xs text-ink no-print">
+          <div className="bg-card border border-line rounded-xl py-2 px-3.5 shadow-card flex items-center justify-center gap-2 text-xs text-ink no-print">
             <ClipboardCheck className="w-4 h-4 text-signal shrink-0" />
             <span>
               <strong>Review &amp; Confirm</strong> — read-only. Click <strong>Update</strong> to make changes.
             </span>
           </div>
 
-          {/* Summary Card (LOCATION, DATE, YEAR, VERIFIED BY) */}
-          <div className="bg-card border border-line rounded-xl p-5 shadow-card">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* LOCATION */}
-              <div>
+          {/* Compact Summary Card (2 compact rows matching Step 1) */}
+          <div className="bg-card border border-line rounded-xl p-3.5 sm:p-4 shadow-card space-y-3">
+            {/* Row 1: Location | Date | Year */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_100px] gap-3 items-center">
+              {/* Location */}
+              <div className="sm:col-span-2 lg:col-span-1">
                 <div className="text-[10px] font-bold text-slate uppercase tracking-wider mb-1">
                   Location
                 </div>
-                <div className="flex items-center gap-1.5 text-xs font-bold text-ink">
-                  <MapPin className="w-4 h-4 text-signal shrink-0" />
-                  <span className="truncate">{locationDisplay}</span>
+                <div
+                  className="h-9 bg-[#F1F3F5] text-slate border border-line rounded-lg px-2.5 flex items-center gap-2 text-xs font-semibold select-none"
+                  title={locationDisplay}
+                >
+                  <MapPin className="w-3.5 h-3.5 text-signal shrink-0" />
+                  <span className="truncate text-ink">{locationDisplay}</span>
                 </div>
               </div>
 
-              {/* DATE */}
+              {/* Date */}
               <div>
                 <div className="text-[10px] font-bold text-slate uppercase tracking-wider mb-1">
-                  Date
+                  Verification Date
                 </div>
-                <div className="text-xs font-mono font-bold text-ink">
-                  {date}
+                <div className="h-9 bg-card border border-line rounded-lg px-3 flex items-center text-xs font-mono font-bold text-ink">
+                  {formatDate(date)}
                 </div>
               </div>
 
-              {/* YEAR */}
+              {/* Year */}
               <div>
                 <div className="text-[10px] font-bold text-slate uppercase tracking-wider mb-1">
-                  Year
+                  Audit Year
                 </div>
-                <div className="text-xs font-mono font-bold text-ink">
+                <div className="h-9 bg-[#F1F3F5] text-slate border border-line rounded-lg px-3 flex items-center text-xs font-mono font-bold">
                   {year}
                 </div>
               </div>
+            </div>
 
-              {/* VERIFIED BY */}
-              <div>
-                <div className="text-[10px] font-bold text-slate uppercase tracking-wider mb-1">
-                  Verified By
+            {/* Row 2: Verified By */}
+            <div>
+              <div className="text-[10px] font-bold text-slate uppercase tracking-wider mb-1">
+                Verified By
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="h-9 bg-card border border-line rounded-lg px-3 flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full bg-ink text-white flex items-center justify-center text-[9px] font-bold">
+                    1
+                  </span>
+                  <span className="text-xs font-medium text-ink">{verifier1 || '—'}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-full bg-ink text-white flex items-center justify-center text-[9px] font-bold">
-                      1
-                    </span>
-                    <span className="text-xs font-medium text-ink">{verifier1 || '—'}</span>
-                  </div>
 
-                  <div className="flex items-center gap-1.5">
+                {verifier2 && (
+                  <div className="h-9 bg-card border border-line rounded-lg px-3 flex items-center gap-2">
                     <span className="w-4 h-4 rounded-full bg-ink text-white flex items-center justify-center text-[9px] font-bold">
                       2
                     </span>
-                    <span className="text-xs font-medium text-ink">{verifier2 || '—'}</span>
+                    <span className="text-xs font-medium text-ink">{verifier2}</span>
                   </div>
+                )}
 
-                  <div className="flex items-center gap-1.5">
+                {verifier3 && (
+                  <div className="h-9 bg-card border border-line rounded-lg px-3 flex items-center gap-2">
                     <span className="w-4 h-4 rounded-full bg-ink text-white flex items-center justify-center text-[9px] font-bold">
                       3
                     </span>
-                    <span className="text-xs font-medium text-ink">{verifier3 || '—'}</span>
+                    <span className="text-xs font-medium text-ink">{verifier3}</span>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
 
           {/* Read-Only Table */}
           <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-ink border-collapse">
-                <thead>
-                  <tr className="border-b border-line bg-surface/70 font-semibold text-slate uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-3 w-12 text-center">No</th>
-                    <th className="py-3 px-3 whitespace-nowrap">Serial No.</th>
-                    <th className="py-3 px-4 min-w-[180px]">Item</th>
-                    <th className="py-3 px-3 min-w-[130px]">Category</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">System Qty</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">Physical Qty</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">Difference</th>
-                    <th className="py-3 px-3 whitespace-nowrap">Condition</th>
-                    <th className="py-3 px-3 whitespace-nowrap">Label No</th>
-                    <th className="py-3 px-4 min-w-[160px]">Remarks</th>
-                    <th className="py-3 px-3 text-center whitespace-nowrap">Status</th>
+            <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto">
+              <table className="w-full min-w-[1550px] text-left text-xs text-ink border-collapse table-auto">
+                <thead className="sticky top-0 z-30 bg-surface border-b border-line shadow-xs">
+                  <tr className="border-b border-line bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
+                    <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60">No</th>
+                    <th className="py-2.5 px-3 w-[420px] min-w-[400px] border-r border-line">Serial No.</th>
+                    <th className="py-2.5 px-4 min-w-[170px]">Item</th>
+                    <th className="py-2.5 px-3 min-w-[130px]">Category</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">System Qty</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[85px]">Physical Qty</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">Difference</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[105px]">Condition</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[210px] w-[220px]">Issued / Destroyed</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[95px]">Label No</th>
+                    <th className="py-2.5 px-4 min-w-[140px]">Remarks</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[100px]">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
                   {items.map((row, idx) => {
                     const hasPhysQty = row.physical_qty !== '' && row.physical_qty !== null && !isNaN(Number(row.physical_qty));
                     const diff = hasPhysQty ? Number(row.difference) : null;
+                    const markedQty = Number(row.issued_destroyed_qty || 1);
 
                     return (
-                      <tr key={row.id || idx} className="hover:bg-surface/50 transition-colors">
+                      <tr key={row.id || idx} className="hover:bg-surface/50 transition-colors group">
                         {/* 1. No */}
-                        <td className="py-3 px-3 text-center text-slate font-mono font-medium">
+                        <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] max-w-[48px] border-r border-line/60">
                           {idx + 1}
                         </td>
 
                         {/* 2. Serial No. */}
-                        <td className="py-3 px-3 font-mono font-semibold text-ink whitespace-nowrap">
-                          {row.item_code || '—'}
+                        <td className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line">
+                          <SerialNumberCell
+                            serialNumbers={row.serial_numbers}
+                            manufacturerSerialNumbers={row.manufacturer_serial_numbers}
+                            singleSerial={row.item_code}
+                            singleMfg={row.manufacturer_sn}
+                          />
                         </td>
 
                         {/* 3. Item */}
-                        <td className="py-3 px-4 font-semibold text-ink">
+                        <td className="py-2.5 px-4 font-semibold text-ink align-top min-w-[170px] leading-snug">
                           {row.item_name}
                         </td>
 
                         {/* 4. Category */}
-                        <td className="py-3 px-3 text-slate">
+                        <td className="py-2.5 px-3 text-slate align-top min-w-[130px] leading-snug">
                           {row.category}
                         </td>
 
                         {/* 5. System Qty */}
-                        <td className="py-3 px-3 text-center font-bold text-ink font-mono text-sm">
+                        <td className="py-2.5 px-3 text-center font-bold text-ink font-mono text-sm align-top whitespace-nowrap min-w-[75px]">
                           {row.system_qty}
                         </td>
 
                         {/* 6. Physical Qty */}
-                        <td className="py-3 px-3 text-center font-mono font-bold text-ink">
-                          {hasPhysQty ? row.physical_qty : <span className="text-slate font-normal">—</span>}
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-ink text-sm align-top whitespace-nowrap min-w-[85px]">
+                          {row.physical_qty !== '' && row.physical_qty !== null ? row.physical_qty : '—'}
                         </td>
 
                         {/* 7. Difference */}
-                        <td className="py-3 px-3 text-center font-mono font-bold">
+                        <td className="py-2.5 px-3 text-center font-mono font-bold align-top whitespace-nowrap min-w-[75px]">
                           {diff === null ? (
                             <span className="text-slate font-normal">—</span>
                           ) : diff === 0 ? (
@@ -783,39 +1618,56 @@ export const NewVerification = () => {
                         </td>
 
                         {/* 8. Condition */}
-                        <td className="py-3 px-3">
-                          {row.condition && row.condition !== '—' ? row.condition : <span className="text-slate">—</span>}
+                        <td className="py-2.5 px-3 align-top whitespace-nowrap min-w-[105px]">
+                          <span className="inline-block px-2 py-0.5 rounded text-xs bg-surface border border-line text-ink">
+                            {row.condition || '—'}
+                          </span>
                         </td>
 
-                        {/* 9. Label No */}
-                        <td className="py-3 px-3 font-mono">
-                          {row.label_no || <span className="text-slate">—</span>}
-                        </td>
-
-                        {/* 10. Remarks */}
-                        <td className="py-3 px-4 text-slate">
-                          {row.remarks || <span className="text-slate">—</span>}
-                        </td>
-
-                        {/* 11. Status Badge */}
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          {!hasPhysQty ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate/10 text-slate">
-                              Not Counted
+                        {/* 9. Issued / Destroyed */}
+                        <td className="py-2.5 px-3 whitespace-nowrap align-top min-w-[210px] w-[220px]">
+                          {row.issued_destroyed === 'Issued' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/50 text-emerald-700 bg-emerald-50/40">
+                              Issued{markedQty > 1 ? ` × ${markedQty}` : ''}
                             </span>
-                          ) : diff === 0 ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#2F7A5C]/10 text-[#2F7A5C] border border-[#2F7A5C]/30">
-                              Matched
+                          ) : row.issued_destroyed === 'Destroyed' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border border-rose-500/50 text-rose-700 bg-rose-50/40">
+                              Destroyed{markedQty > 1 ? ` × ${markedQty}` : ''}
                             </span>
-                          ) : diff < 0 ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#B4483A]/10 text-[#B4483A] border border-[#B4483A]/30">
-                              Shortage
+                          ) : row.issued_destroyed === 'N/A' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border border-line text-slate">
+                              N/A
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                              Excess
-                            </span>
+                            <span className="text-slate">—</span>
                           )}
+                        </td>
+
+                        {/* 10. Label No */}
+                        <td className="py-2.5 px-3 font-mono text-xs text-ink align-top min-w-[95px] whitespace-nowrap">
+                          {row.label_no || '—'}
+                        </td>
+
+                        {/* 11. Remarks */}
+                        <td className="py-2.5 px-4 text-slate text-xs align-top min-w-[140px] leading-snug">
+                          {row.remarks || '—'}
+                        </td>
+
+                        {/* 12. Status */}
+                        <td className="py-2.5 px-3 text-center align-top whitespace-nowrap min-w-[100px]">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
+                              row.status === 'Matched'
+                                ? 'bg-[#2F7A5C]/10 text-[#2F7A5C] border border-[#2F7A5C]/20'
+                                : row.status === 'Shortage'
+                                ? 'bg-[#B4483A]/10 text-[#B4483A] border border-[#B4483A]/20'
+                                : row.status === 'Excess'
+                                ? 'bg-[#2F7A5C]/15 text-[#2F7A5C] border border-[#2F7A5C]/30'
+                                : 'bg-surface text-slate border border-line'
+                            }`}
+                          >
+                            {row.status || 'Not Counted'}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -825,12 +1677,12 @@ export const NewVerification = () => {
             </div>
           </div>
 
-          {/* Bottom Action Buttons (Step 2 - Review Screen) */}
-          <div className="flex items-center justify-between pt-2 no-print">
+          {/* Bottom Action Bar (Step 2) */}
+          <div className="sticky bottom-0 z-20 bg-background/95 backdrop-blur-sm border-t border-line py-2.5 px-4 -mx-4 sm:-mx-6 sm:px-6 flex items-center justify-between shadow-[0_-4px_12px_rgba(0,0,0,0.06)] no-print">
             <button
               type="button"
               onClick={handleCancel}
-              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs"
+              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs cursor-pointer"
             >
               Cancel
             </button>
@@ -840,19 +1692,19 @@ export const NewVerification = () => {
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5"
+                className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
                 title="Print Landscape Verification Document"
               >
                 <Printer className="w-3.5 h-3.5 text-signal" />
                 <span>Print</span>
               </button>
 
-              {/* Update Button (Goes back to Step 1 with data intact) */}
+              {/* Update Button (Goes back to Step 1 with draft data intact) */}
               {!isExistingConfirmed && (
                 <button
                   type="button"
                   onClick={() => setCurrentStep(1)}
-                  className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
                   title="Return to form to edit details"
                 >
                   <Save className="w-3.5 h-3.5 text-signal" />
@@ -860,13 +1712,13 @@ export const NewVerification = () => {
                 </button>
               )}
 
-              {/* Confirm > Button */}
+              {/* Confirm Button */}
               {!isExistingConfirmed && (
                 <button
                   type="button"
                   onClick={handleConfirmVerification}
-                  disabled={submitting}
-                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={submitting || isReadOnly}
+                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <span>{submitting ? 'Confirming...' : 'Confirm'}</span>
                   <ChevronRight className="w-4 h-4" />
@@ -877,7 +1729,7 @@ export const NewVerification = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/verification/history')}
-                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all"
+                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all cursor-pointer"
                 >
                   Return to History
                 </button>
@@ -906,6 +1758,105 @@ export const NewVerification = () => {
         }
         confirmLabel="Yes, Remove"
         cancelLabel="Cancel"
+        isDestructive={true}
+      />
+
+      {/* Confirmation Dialog for Discarding Draft from Banner */}
+      <ConfirmModal
+        isOpen={isDiscardModalOpen}
+        onClose={() => setIsDiscardModalOpen(false)}
+        onConfirm={handleConfirmDiscardDraft}
+        title="Discard Saved Draft?"
+        message="Are you sure you want to discard this in-progress draft verification? All saved counts and row entries will be cleared and the verification will restart from scratch."
+        confirmLabel={isDiscarding ? "Discarding..." : "Yes, Discard Draft"}
+        cancelLabel="Keep Draft"
+        isDestructive={true}
+      />
+
+      {/* Confirmation Dialog on Cancel with Active Draft */}
+      {isCancelDraftModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in"
+          onClick={() => setIsCancelDraftModalOpen(false)}
+        >
+          <div
+            className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md overflow-hidden animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-line bg-surface/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-signal/10 text-signal">
+                  <ClipboardCheck className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-semibold text-ink">
+                  Leave Verification?
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCancelDraftModalOpen(false)}
+                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs">
+              <p className="text-slate leading-relaxed">
+                You have an active draft with saved line items. Would you like to keep your saved progress to continue later, or discard the draft?
+              </p>
+            </div>
+
+            <div className="p-4 border-t border-line bg-surface/50 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCancelDraftModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-medium text-slate hover:text-ink bg-card hover:bg-surface border border-line rounded-lg transition-colors cursor-pointer"
+              >
+                Continue Editing
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsCancelDraftModalOpen(false);
+                  try {
+                    await api.delete('/verifications/draft', { unit_id: effectiveUnitId });
+                  } catch (err) {
+                    console.error(err);
+                  }
+                  navigate('/verification');
+                }}
+                className="px-3.5 py-2 text-xs font-medium text-white bg-[#B4483A] hover:bg-[#96382C] rounded-lg transition-colors shadow-subtle cursor-pointer"
+              >
+                Discard Draft &amp; Exit
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCancelDraftModalOpen(false);
+                  navigate('/verification');
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-signal hover:bg-[#1f406b] rounded-lg transition-colors shadow-subtle cursor-pointer"
+              >
+                Keep Draft &amp; Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog on Cancel with Unsaved Changes and No Draft */}
+      <ConfirmModal
+        isOpen={isUnsavedLeaveModalOpen}
+        onClose={() => setIsUnsavedLeaveModalOpen(false)}
+        onConfirm={() => {
+          setIsUnsavedLeaveModalOpen(false);
+          navigate('/verification');
+        }}
+        title="Unsaved Changes"
+        message="You have unsaved rows. If you leave now, any un-saved edits will be lost. Are you sure you want to leave?"
+        confirmLabel="Leave Without Saving"
+        cancelLabel="Stay on Page"
         isDestructive={true}
       />
     </AppShell>

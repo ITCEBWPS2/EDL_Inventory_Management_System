@@ -92,4 +92,8 @@ body {
   .overflow-x-auto {
     overflow: visible !important;
   }
+  .sticky {
+    position: static !important;
+    box-shadow: none !important;
+  }
 }

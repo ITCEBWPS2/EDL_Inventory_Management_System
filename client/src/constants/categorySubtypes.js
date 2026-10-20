@@ -41,6 +41,115 @@ export const CATEGORY_SUBTYPES = {
 };
 
 /**
+ * Helper to safely resolve configured sub-categories for any category slug or name
+ */
+export const getCategorySubtypes = (categoryIdentifier) => {
+  if (!categoryIdentifier) return [];
+  const s = String(categoryIdentifier).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  if (CATEGORY_SUBTYPES[s]) return CATEGORY_SUBTYPES[s];
+  if (s.includes('tool')) return CATEGORY_SUBTYPES['tools-equipment'] || [];
+  if (s.includes('furniture')) return CATEGORY_SUBTYPES['furniture'] || [];
+  if (s.includes('it') || s.includes('computing')) return CATEGORY_SUBTYPES['it-computing-equipment'] || [];
+  if (s.includes('network') || s.includes('communication')) return CATEGORY_SUBTYPES['network-communication-equipment'] || [];
+  if (s.includes('audio') || s.includes('visual') || s.includes('presentation')) return CATEGORY_SUBTYPES['audio-visual-presentation-equipment'] || [];
+  return [];
+};
+
+/**
+ * Builds the union of configured taxonomy item types and existing inventory items for a category.
+ * Guarantees:
+ * 1. Every option represents a unique item name (case-insensitive deduplication).
+ * 2. All configured item types of the category are present, even if no inventory record exists yet.
+ * 3. Any additional inventory items for this category not in the configured taxonomy are appended under matching or fallback sub-categories.
+ * 4. Options contain ONLY the clean item name, without serial numbers or codes attached.
+ * 5. id is attached only if exactly one inventory item exists with that name; otherwise id is null.
+ */
+export const buildCategoryItemUnion = (categoryIdentifier, inventoryList = [], currentItemName = '') => {
+  const subCats = getCategorySubtypes(categoryIdentifier);
+  const unionItems = [];
+  const seen = new Set();
+
+  // 1. Add all configured item types grouped by sub-category in order
+  subCats.forEach(sub => {
+    const meta = SUBTYPE_METADATA[sub.slug];
+    const options = meta?.subTypeOptions || [];
+    options.forEach(optName => {
+      const trimmedOpt = String(optName || '').trim();
+      if (!trimmedOpt) return;
+      const norm = trimmedOpt.toLowerCase();
+      if (seen.has(norm)) return;
+      seen.add(norm);
+
+      // Find matching inventory items
+      const invMatches = (inventoryList || []).filter(
+        i => (i.item_name || '').trim().toLowerCase() === norm
+      );
+      const matchedId = invMatches.length === 1 ? invMatches[0].id : null;
+      const matchedCode = invMatches.length === 1 ? (invMatches[0].item_code || '') : '';
+
+      unionItems.push({
+        id: matchedId,
+        item_name: trimmedOpt,
+        item_code: matchedCode,
+        sub_type: sub.slug,
+        sub_category_name: sub.name,
+        is_configured: true,
+        is_inventory: invMatches.length > 0
+      });
+    });
+  });
+
+  // 2. Add existing inventory items that were not among configured types
+  (inventoryList || []).forEach(invItem => {
+    const rawName = (invItem.item_name || '').trim();
+    if (!rawName) return;
+    const norm = rawName.toLowerCase();
+    if (seen.has(norm)) return;
+    seen.add(norm);
+
+    const matchedSub = subCats.find(s => 
+      (invItem.sub_type && invItem.sub_type.toLowerCase() === s.slug.toLowerCase()) ||
+      itemMatchesSubType(invItem, s.slug)
+    );
+
+    const sameNameMatches = (inventoryList || []).filter(
+      i => (i.item_name || '').trim().toLowerCase() === norm
+    );
+    const matchedId = sameNameMatches.length === 1 ? invItem.id : null;
+    const matchedCode = sameNameMatches.length === 1 ? (invItem.item_code || '') : '';
+
+    unionItems.push({
+      id: matchedId,
+      item_name: rawName,
+      item_code: matchedCode,
+      sub_type: matchedSub ? matchedSub.slug : 'other',
+      sub_category_name: matchedSub ? matchedSub.name : 'Other Inventory Items',
+      is_configured: false,
+      is_inventory: true
+    });
+  });
+
+  // 3. Preserve current item name when editing legacy records if not yet in list
+  if (currentItemName && currentItemName.trim()) {
+    const normCurrent = currentItemName.trim().toLowerCase();
+    if (!seen.has(normCurrent)) {
+      seen.add(normCurrent);
+      unionItems.push({
+        id: null,
+        item_name: currentItemName.trim(),
+        item_code: '',
+        sub_type: 'custom',
+        sub_category_name: 'Existing Record Item',
+        is_configured: false,
+        is_inventory: false
+      });
+    }
+  }
+
+  return unionItems;
+};
+
+/**
  * Metadata per sub-type including code prefix, singular form, field label, and example options
  */
 export const SUBTYPE_METADATA = {
@@ -56,9 +165,9 @@ export const SUBTYPE_METADATA = {
       'Low Back Chair',
       'Mid Back Chair',
       'High Back Chair',
-      'Computer Executive',
-      'Computer Typist',
-      'Computer Assistant',
+      'Computer Executive Chair',
+      'Computer Typist Chair',
+      'Computer Assistant Chair',
       'Front Chair'
     ]
   },
@@ -129,7 +238,8 @@ export const SUBTYPE_METADATA = {
       'Keyboard',
       'Mouse',
       'DVD Writer',
-      'Tab'
+      'Tab',
+      'HDMI to VGA Convertor'
     ]
   },
   'storage-devices': {
@@ -158,7 +268,8 @@ export const SUBTYPE_METADATA = {
       'Thermal Printer',
       'Color A3 Printer',
       'Cheque Printer',
-      'Plotter'
+      'Plotter',
+      'Dot Matrix Printer Backup'
     ]
   },
   'scanning-office-machines': {
@@ -367,7 +478,8 @@ export const SUBTYPE_METADATA = {
       'Electric Blower',
       'Trimble GPS Receiver',
       'Bluebird Data Collector',
-      'Binocular'
+      'Binocular',
+      'Digital Multimeter'
     ]
   },
   'tool-storage-handling': {
@@ -560,7 +672,12 @@ export const itemMatchesSubType = (item, subTypeSlug) => {
   // 2. Keyword fallback per subcategory
   // Furniture
   if (target === 'chairs') {
-    return name.includes('chair') || code.includes('-chr-') || code.startsWith('chr-');
+    const subTypeLower = (item.sub_type || '').toLowerCase();
+    const isOldChairType = (
+      name.includes('computer executive') || name.includes('computer typist') || name.includes('computer assistant') ||
+      subTypeLower.includes('computer executive') || subTypeLower.includes('computer typist') || subTypeLower.includes('computer assistant')
+    );
+    return name.includes('chair') || code.includes('-chr-') || code.startsWith('chr-') || isOldChairType;
   }
   if (target === 'tables') {
     return name.includes('table') || name.includes('desk') || code.includes('-tbl-') || code.startsWith('tbl-');

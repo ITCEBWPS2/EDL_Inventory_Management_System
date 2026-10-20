@@ -6,6 +6,8 @@ import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { RecordModal } from '../components/common/RecordModal';
 import { BackButton } from '../components/common/BackButton';
+import { DateInput } from '../components/common/DateInput';
+import { formatDate } from '../utils/formatters';
 import {
   Search,
   Filter,
@@ -266,6 +268,7 @@ export const ExpendedTransactions = () => {
         const iName = displayName.toLowerCase();
         const disp = (row.disposition || '').toLowerCase();
         const dateStr = row.date ? String(row.date).split('T')[0] : '';
+        const dateFormatted = formatDate(row.date);
         const notes = (row.notes || '').toLowerCase();
 
         const matches =
@@ -273,6 +276,7 @@ export const ExpendedTransactions = () => {
           iName.includes(q) ||
           disp.includes(q) ||
           dateStr.includes(q) ||
+          (dateFormatted !== '—' && dateFormatted.toLowerCase().includes(q)) ||
           notes.includes(q);
 
         if (!matches) return false;
@@ -414,7 +418,7 @@ export const ExpendedTransactions = () => {
         date: formData.date,
         voucher_no: formData.voucher_no.trim(),
         disposition: formData.disposition.trim(),
-        notes: formData.notes || '',
+        notes: (formData.notes || '').trim(),
         unit_id: activeUnitId
       };
 
@@ -558,20 +562,21 @@ export const ExpendedTransactions = () => {
                 <th className="py-3 px-4">Item</th>
                 <th className="py-3 px-4 text-center">Qty</th>
                 <th className="py-3 px-4">How Disposed Of</th>
+                <th className="py-3 px-4">Description</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/60">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate">
+                  <td colSpan={8} className="py-12 text-center text-slate">
                     <div className="inline-block w-6 h-6 border-2 border-line border-t-ink rounded-full animate-spin mb-2"></div>
                     <div>Loading expended transactions...</div>
                   </td>
                 </tr>
               ) : paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate">
+                  <td colSpan={8} className="py-12 text-center text-slate">
                     <div className="text-sm font-medium text-ink">No expended records found.</div>
                     <p className="text-xs mt-1 text-slate">Try adjusting your filter criteria or search query.</p>
                   </td>
@@ -579,7 +584,7 @@ export const ExpendedTransactions = () => {
               ) : (
                 paginatedData.map((row, idx) => {
                   const rowNumber = (currentPage - 1) * pageSize + idx + 1;
-                  const dateDisplay = row.date ? String(row.date).split('T')[0] : '—';
+                  const dateDisplay = formatDate(row.date);
 
                   return (
                     <tr
@@ -618,7 +623,21 @@ export const ExpendedTransactions = () => {
                         {row.disposition || '—'}
                       </td>
 
-                      {/* 7. Actions — separate Edit and Delete buttons (icon + label) */}
+                      {/* 7. Description — saved notes with truncation and hover tooltip */}
+                      <td className="py-3.5 px-4 max-w-[220px]">
+                        {row.notes && row.notes.trim() ? (
+                          <span
+                            className="block truncate text-slate hover:text-ink cursor-default"
+                            title={row.notes}
+                          >
+                            {row.notes}
+                          </span>
+                        ) : (
+                          <span className="text-slate/40 font-mono text-sm">—</span>
+                        )}
+                      </td>
+
+                      {/* 8. Actions — separate Edit and Delete buttons (icon + label) */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-2">
                           {canWrite ? (
@@ -715,12 +734,11 @@ export const ExpendedTransactions = () => {
 
             <div>
               <label className="block font-medium text-ink mb-1">Date</label>
-              <input
-                type="date"
+              <DateInput
                 required
                 value={formData.date}
                 onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
-                className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink"
+                placeholder="dd/mm/yyyy"
               />
             </div>
           </div>
@@ -832,6 +850,26 @@ export const ExpendedTransactions = () => {
                 <option value="__custom__">+ Enter Custom Destination...</option>
               </select>
             )}
+          </div>
+
+          {/* Row 5: Description (optional multi-line textarea) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block font-medium text-ink">
+                Description <span className="text-slate text-[11px] font-normal">(Optional)</span>
+              </label>
+              <span className="text-[10px] text-slate font-mono">
+                {(formData.notes || '').length}/500
+              </span>
+            </div>
+            <textarea
+              rows={3}
+              maxLength={500}
+              placeholder="e.g. Reason, destination details, condition, serial numbers..."
+              value={formData.notes || ''}
+              onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
+              className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink text-xs leading-relaxed"
+            />
           </div>
         </div>
       </RecordModal>

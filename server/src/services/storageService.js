@@ -13,7 +13,10 @@ const storageService = {
    */
   async uploadVoucher(file, transactionId) {
     const ext = path.extname(file.originalname);
-    const fileName = `voucher_${transactionId || Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+    const identifier = (transactionId && String(transactionId).trim())
+      ? String(transactionId).trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+      : Date.now();
+    const fileName = `voucher_${identifier}_${Math.random().toString(36).substring(2, 8)}${ext}`;
     const destPath = path.join(UPLOADS_DIR, fileName);
 
     if (file.buffer) {

@@ -90,7 +90,14 @@ const dashboardController = {
           unit_name: e.unit_name
         }))
       ];
-      combinedRecent.sort((a, b) => new Date(b.date) - new Date(a.date));
+      combinedRecent.sort((a, b) => {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        if (timeA !== timeB) return timeB - timeA;
+        const createA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const createB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return createB - createA;
+      });
       const recentTransactions = combinedRecent.slice(0, 8);
 
       // 5. Verification Status

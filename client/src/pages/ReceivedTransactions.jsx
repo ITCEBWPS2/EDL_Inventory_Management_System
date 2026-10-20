@@ -6,6 +6,8 @@ import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { RecordModal } from '../components/common/RecordModal';
 import { BackButton } from '../components/common/BackButton';
+import { DateInput } from '../components/common/DateInput';
+import { formatDate } from '../utils/formatters';
 import {
   Search,
   Filter,
@@ -22,6 +24,13 @@ import {
   RotateCcw,
   Loader2
 } from 'lucide-react';
+import {
+  CATEGORY_SUBTYPES,
+  SUBTYPE_METADATA,
+  getCategorySubtypes,
+  buildCategoryItemUnion,
+  itemMatchesSubType
+} from '../constants/categorySubtypes';
 
 const INITIAL_SENDERS = [
   'Finco Furnitures',
@@ -66,7 +75,7 @@ export const ReceivedTransactions = () => {
   const [editRowNo, setEditRowNo] = useState(1);
   const [formData, setFormData] = useState({
     row_no: 1,
-    date: new Date().toISOString().split('T')[0],
+    date: '',
     voucher_no: '',
     category_id: '',
     item_name: '',
@@ -96,15 +105,24 @@ export const ReceivedTransactions = () => {
   const [detailModalItem, setDetailModalItem] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
 
+  // Configuration switch: whether From Whom Received is required
+  const [isSenderRequired, setIsSenderRequired] = useState(
+    () => import.meta.env.VITE_REQUIRE_RECEIVED_SENDER === 'true'
+  );
+
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [txRes, itemsRes, catRes] = await Promise.all([
+      const [txRes, itemsRes, catRes, configRes] = await Promise.all([
         api.get('/transactions/received', { unit_id: selectedUnitId }),
         api.get('/inventory', { all: 'true' }),
-        api.get('/inventory/categories')
+        api.get('/inventory/categories'),
+        api.get('/transactions/config').catch(() => null)
       ]);
+      if (configRes && configRes.success && configRes.data) {
+        setIsSenderRequired(Boolean(configRes.data.require_received_sender));
+      }
       if (txRes.success) setTransactions(txRes.data || []);
       if (itemsRes.success) setItems(itemsRes.data || []);
       if (catRes.success && catRes.data && catRes.data.length > 0) {
@@ -144,12 +162,16 @@ export const ReceivedTransactions = () => {
   const distinctDates = useMemo(() => {
     const set = new Set();
     transactions.forEach(t => {
-      if (t.date) {
-        const d = String(t.date).split('T')[0];
-        set.add(d);
+      if (t.date && String(t.date).trim()) {
+        const d = String(t.date).split('T')[0].trim();
+        if (d) set.add(d);
       }
     });
     return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  const hasNoDateRecords = useMemo(() => {
+    return transactions.some(t => !t.date || !String(t.date).trim());
   }, [transactions]);
 
   // Distinct items list for filter dropdown
@@ -182,8 +204,8 @@ export const ReceivedTransactions = () => {
     return senderOptions.filter(s => s.toLowerCase().includes(q));
   }, [senderOptions, senderSearchText]);
 
-  // Fetch items for selected category from backend
-  const fetchCategoryItems = async (catId) => {
+  // Fetch items for selected category from backend + configured taxonomy
+  const fetchCategoryItems = async (catId, currentItemName = '') => {
     if (!catId) {
       setCategoryItems([]);
       setItemsLoading(false);
@@ -191,22 +213,14 @@ export const ReceivedTransactions = () => {
     }
     setItemsLoading(true);
     try {
+      const catObj = categories.find(c => c.id === catId || c.slug === catId);
+      const catSlug = catObj?.slug || catObj?.name || catId;
+
       const res = await api.get('/inventory', { all: 'true', category_id: catId });
-      if (res.success && Array.isArray(res.data)) {
-        // Deduplicate items by item_name
-        const uniqueItems = [];
-        const seen = new Set();
-        res.data.forEach(item => {
-          const name = (item.item_name || '').trim();
-          if (name && !seen.has(name.toLowerCase())) {
-            seen.add(name.toLowerCase());
-            uniqueItems.push(item);
-          }
-        });
-        setCategoryItems(uniqueItems);
-      } else {
-        setCategoryItems([]);
-      }
+      const inventoryList = (res.success && Array.isArray(res.data)) ? res.data : [];
+
+      const unionItems = buildCategoryItemUnion(catSlug, inventoryList, currentItemName);
+      setCategoryItems(unionItems);
     } catch (err) {
       console.error('Failed to fetch items for category:', err);
       setCategoryItems([]);
@@ -222,9 +236,28 @@ export const ReceivedTransactions = () => {
     return categoryItems.filter(item => {
       const name = (item.item_name || '').toLowerCase();
       const code = (item.item_code || '').toLowerCase();
-      return name.includes(q) || code.includes(q);
+      const subCat = (item.sub_category_name || '').toLowerCase();
+      return name.includes(q) || code.includes(q) || subCat.includes(q);
     });
   }, [categoryItems, itemSearchText]);
+
+  // Group filtered items by sub-category for structured display
+  const groupedCategoryItems = useMemo(() => {
+    const groups = [];
+    const groupMap = new Map();
+
+    filteredCategoryItems.forEach(item => {
+      const groupName = item.sub_category_name || 'General';
+      if (!groupMap.has(groupName)) {
+        const groupObj = { groupName, items: [] };
+        groupMap.set(groupName, groupObj);
+        groups.push(groupObj);
+      }
+      groupMap.get(groupName).items.push(item);
+    });
+
+    return groups;
+  }, [filteredCategoryItems]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -272,8 +305,12 @@ export const ReceivedTransactions = () => {
 
       // 2. Date filter
       if (selectedDateFilter) {
-        const rowDate = row.date ? String(row.date).split('T')[0] : '';
-        if (rowDate !== selectedDateFilter) return false;
+        const rowDate = row.date ? String(row.date).split('T')[0].trim() : '';
+        if (selectedDateFilter === '__NO_DATE__') {
+          if (rowDate) return false;
+        } else {
+          if (rowDate !== selectedDateFilter) return false;
+        }
       }
 
       // 3. Item filter
@@ -290,7 +327,8 @@ export const ReceivedTransactions = () => {
         const fWhom = (row.from_whom || '').toLowerCase();
         const nNotes = (row.notes || '').toLowerCase();
         const sNo = (row.serial_number || '').toLowerCase();
-        const rDate = row.date ? String(row.date).split('T')[0] : '';
+        const rDate = row.date ? String(row.date).split('T')[0].trim() : '';
+        const rDateFormatted = formatDate(row.date);
 
         const matches =
           vNo.includes(q) ||
@@ -299,7 +337,8 @@ export const ReceivedTransactions = () => {
           fWhom.includes(q) ||
           nNotes.includes(q) ||
           sNo.includes(q) ||
-          rDate.includes(q);
+          (rDate && rDate.includes(q)) ||
+          (rDateFormatted !== '—' && rDateFormatted.toLowerCase().includes(q));
 
         if (!matches) return false;
       }
@@ -320,7 +359,9 @@ export const ReceivedTransactions = () => {
     setFormData(p => ({
       ...p,
       category_id: catId,
-      item_name: ''
+      item_id: null,
+      item_name: '',
+      item_code: ''
     }));
     setItemSearchText('');
     setIsItemDropdownOpen(false);
@@ -332,12 +373,12 @@ export const ReceivedTransactions = () => {
     setIsEditing(false);
     setEditingId(null);
     const nextNo = transactions.length + 1;
-    const defaultSender = 'Finco Furnitures';
+    const defaultSender = isSenderRequired ? 'Finco Furnitures' : '';
 
     setFormData({
       row_no: nextNo,
-      date: new Date().toISOString().split('T')[0],
-      voucher_no: generateNextVoucherNo(),
+      date: '',
+      voucher_no: '',
       category_id: '',
       item_name: '',
       quantity: 1,
@@ -380,7 +421,7 @@ export const ReceivedTransactions = () => {
 
     setFormData({
       row_no: rowNo,
-      date: row.date ? String(row.date).split('T')[0] : new Date().toISOString().split('T')[0],
+      date: row.date ? String(row.date).split('T')[0].trim() : '',
       voucher_no: row.voucher_no || '',
       category_id: resolvedCatId,
       item_name: row.item_name || '',
@@ -394,7 +435,7 @@ export const ReceivedTransactions = () => {
     setIsSenderDropdownOpen(false);
 
     if (resolvedCatId) {
-      fetchCategoryItems(resolvedCatId);
+      fetchCategoryItems(resolvedCatId, row.item_name || '');
     } else {
       setCategoryItems([]);
     }
@@ -439,14 +480,9 @@ export const ReceivedTransactions = () => {
       return;
     }
 
-    if (!formData.voucher_no.trim()) {
-      toast.error('Voucher number is required.');
-      return;
-    }
-
     // Resolve sender
-    const finalSender = (isCustomSender ? formData.from_whom : (formData.from_whom || senderSearchText)).trim();
-    if (!finalSender) {
+    const finalSender = (isCustomSender ? formData.from_whom : (formData.from_whom || senderSearchText || '')).trim();
+    if (isSenderRequired && !finalSender) {
       toast.error('Please select or specify who the item was received from.');
       return;
     }
@@ -460,14 +496,17 @@ export const ReceivedTransactions = () => {
     try {
       const payload = new FormData();
       payload.append('item_name', trimmedItemName);
+      if (formData.item_id) {
+        payload.append('item_id', formData.item_id);
+      }
       if (formData.category_id) {
         payload.append('category_id', formData.category_id);
         const selCat = categories.find(c => c.id === formData.category_id);
         if (selCat) payload.append('category', selCat.name);
       }
       payload.append('quantity', formData.quantity);
-      payload.append('date', formData.date);
-      payload.append('voucher_no', formData.voucher_no.trim());
+      payload.append('date', (formData.date || '').trim());
+      payload.append('voucher_no', (formData.voucher_no || '').trim());
       payload.append('from_whom', finalSender);
       payload.append('notes', formData.notes || '');
 
@@ -497,7 +536,8 @@ export const ReceivedTransactions = () => {
 
   // Delete Transaction
   const handleDelete = async (row) => {
-    if (!window.confirm(`Are you sure you want to delete received record ${row.voucher_no}?`)) {
+    const recordLabel = row.voucher_no?.trim() ? `voucher ${row.voucher_no}` : (row.item_name || 'this record');
+    if (!window.confirm(`Are you sure you want to delete received record for ${recordLabel}?`)) {
       return;
     }
     try {
@@ -547,25 +587,26 @@ export const ReceivedTransactions = () => {
               <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
             </div>
 
-            {/* Filter by Date */}
-            <div className="relative min-w-[135px]">
-              <select
-                id="select-date-filter"
-                value={selectedDateFilter}
-                onChange={(e) => {
-                  setSelectedDateFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
-                title="Filter by Receipt Date"
-              >
-                <option value="">All Dates</option>
-                {distinctDates.map(date => (
-                  <option key={date} value={date}>{date}</option>
-                ))}
-              </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
-            </div>
+              {/* Filter by Date */}
+              <div className="relative min-w-[135px]">
+                <select
+                  id="select-date-filter"
+                  value={selectedDateFilter}
+                  onChange={(e) => {
+                    setSelectedDateFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
+                  title="Filter by Receipt Date"
+                >
+                  <option value="">All Dates</option>
+                  {hasNoDateRecords && <option value="__NO_DATE__">No Date (—)</option>}
+                  {distinctDates.map(date => (
+                    <option key={date} value={date}>{formatDate(date)}</option>
+                  ))}
+                </select>
+                <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
+              </div>
 
             {/* Filter by Item */}
             <div className="relative min-w-[145px]">
@@ -675,7 +716,7 @@ export const ReceivedTransactions = () => {
               ) : (
                 paginatedData.map((row, idx) => {
                   const rowNumber = (currentPage - 1) * pageSize + idx + 1;
-                  const dateDisplay = row.date ? String(row.date).split('T')[0] : '—';
+                  const dateDisplay = formatDate(row.date);
                   const hasExtraInfo = Boolean(
                     (row.notes && row.notes.trim()) ||
                     (row.serial_number && row.serial_number.trim())
@@ -715,20 +756,22 @@ export const ReceivedTransactions = () => {
                         </span>
                       </td>
 
-                      {/* 6. From Whom Received (styled as link / highlighted text) */}
+                      {/* 6. From Whom Received (styled as link / highlighted text if non-empty, plain dash if empty) */}
                       <td className="py-3.5 px-4">
-                        <span
-                          onClick={() => {
-                            if (row.from_whom) {
+                        {row.from_whom?.trim() ? (
+                          <span
+                            onClick={() => {
                               setSearchQuery(row.from_whom);
                               setCurrentPage(1);
-                            }
-                          }}
-                          className="text-signal hover:underline font-medium cursor-pointer transition-colors"
-                          title="Click to search records from this sender"
-                        >
-                          {row.from_whom || '—'}
-                        </span>
+                            }}
+                            className="text-signal hover:underline font-medium cursor-pointer transition-colors"
+                            title="Click to search records from this sender"
+                          >
+                            {row.from_whom}
+                          </span>
+                        ) : (
+                          <span className="text-slate/60 font-mono">—</span>
+                        )}
                       </td>
 
                       {/* 7. Image ("—" or thumbnail/icon) */}
@@ -880,26 +923,27 @@ export const ReceivedTransactions = () => {
               />
             </div>
 
-            {/* Date (date picker, defaults to today) */}
+            {/* Date (date picker, optional) */}
             <div>
-              <label className="block font-medium text-ink mb-1">Date</label>
-              <input
-                type="date"
-                required
-                value={formData.date}
+              <label className="block font-medium text-ink mb-1">
+                Date <span className="text-slate text-[11px] font-normal">(Optional)</span>
+              </label>
+              <DateInput
+                value={formData.date || ''}
                 onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
-                className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink"
+                placeholder="dd/mm/yyyy"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            {/* Voucher No. (auto-generated, read-only or editable as needed) */}
+            {/* Voucher No. (optional input) */}
             <div>
-              <label className="block font-medium text-ink mb-1">Voucher No.</label>
+              <label className="block font-medium text-ink mb-1">
+                Voucher No. <span className="text-slate font-normal">(Optional)</span>
+              </label>
               <input
                 type="text"
-                required
                 value={formData.voucher_no}
                 onChange={(e) => setFormData(p => ({ ...p, voucher_no: e.target.value }))}
                 placeholder="e.g. RV-005"
@@ -1006,32 +1050,41 @@ export const ReceivedTransactions = () => {
 
               {/* Dropdown list */}
               {isItemDropdownOpen && formData.category_id && !itemsLoading && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-card border border-line rounded-lg shadow-modal max-h-48 overflow-y-auto divide-y divide-line/40 animate-fade-in">
-                  {filteredCategoryItems.length > 0 ? (
-                    filteredCategoryItems.map((item) => {
-                      const itemName = typeof item === 'string' ? item : (item.item_name || item.name);
-                      const isSelected = formData.item_name === itemName;
-                      return (
-                        <div
-                          key={item.id || itemName}
-                          onClick={() => {
-                            setFormData(p => ({
-                              ...p,
-                              item_name: itemName,
-                              item_code: item.item_code || p.item_code || ''
-                            }));
-                            setItemSearchText(itemName);
-                            setIsItemDropdownOpen(false);
-                          }}
-                          className={`px-3 py-2 text-xs cursor-pointer transition-colors flex items-center justify-between ${
-                            isSelected ? 'bg-signal/10 text-signal font-semibold' : 'text-ink hover:bg-surface'
-                          }`}
-                        >
-                          <span className="font-medium">{itemName}</span>
-                          {isSelected && <span className="text-signal text-[11px] font-bold">✓</span>}
+                <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-card border border-line rounded-lg shadow-modal max-h-56 overflow-y-auto divide-y divide-line/40 animate-fade-in">
+                  {groupedCategoryItems.length > 0 ? (
+                    groupedCategoryItems.map(({ groupName, items }) => (
+                      <div key={groupName} className="py-1">
+                        <div className="px-3 py-1 text-[10px] font-bold tracking-wider text-slate uppercase bg-surface/80 sticky top-0 backdrop-blur-sm select-none border-y border-line/30 first:border-t-0 flex items-center justify-between">
+                          <span>{groupName}</span>
+                          <span className="text-[9px] font-normal text-slate/80">{items.length}</span>
                         </div>
-                      );
-                    })
+                        {items.map((item) => {
+                          const itemName = item.item_name;
+                          const isSelected = formData.item_name?.toLowerCase() === itemName.toLowerCase();
+                          return (
+                            <div
+                              key={item.id || `${groupName}-${itemName}`}
+                              onClick={() => {
+                                setFormData(p => ({
+                                  ...p,
+                                  item_id: item.id || null,
+                                  item_name: itemName,
+                                  item_code: item.item_code || p.item_code || ''
+                                }));
+                                setItemSearchText(itemName);
+                                setIsItemDropdownOpen(false);
+                              }}
+                              className={`px-3 py-1.5 text-xs cursor-pointer transition-colors flex items-center justify-between ${
+                                isSelected ? 'bg-signal/10 text-signal font-semibold' : 'text-ink hover:bg-surface'
+                              }`}
+                            >
+                              <span className="font-medium text-ink">{itemName}</span>
+                              {isSelected && <span className="text-signal text-[11px] font-bold">✓</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))
                   ) : (
                     <div className="p-3 text-center text-slate text-xs italic">
                       {categoryItems.length === 0
@@ -1048,7 +1101,11 @@ export const ReceivedTransactions = () => {
           <div className="relative" ref={senderDropdownRef}>
             <div className="flex items-center justify-between mb-1">
               <label className="block font-medium text-ink">
-                From Whom Received <span className="text-signal">*</span>
+                From Whom Received {isSenderRequired ? (
+                  <span className="text-signal">*</span>
+                ) : (
+                  <span className="text-slate text-[11px] font-normal">(Optional)</span>
+                )}
               </label>
               {isCustomSender && (
                 <button
@@ -1067,7 +1124,7 @@ export const ReceivedTransactions = () => {
             {isCustomSender ? (
               <input
                 type="text"
-                required
+                required={isSenderRequired}
                 placeholder="Enter custom sender / supplier name..."
                 value={formData.from_whom}
                 onChange={(e) => {
@@ -1080,7 +1137,7 @@ export const ReceivedTransactions = () => {
               <div className="relative">
                 <input
                   type="text"
-                  required
+                  required={isSenderRequired}
                   placeholder="Type to search sender (e.g. Finco, Depot)..."
                   value={senderSearchText}
                   onChange={(e) => {
@@ -1230,7 +1287,7 @@ export const ReceivedTransactions = () => {
               <div className="flex items-center gap-2">
                 <Info className="w-4 h-4 text-signal" />
                 <h3 className="text-sm font-semibold text-ink">
-                  Transaction Details ({detailModalItem.voucher_no})
+                  Transaction Details {detailModalItem.voucher_no?.trim() ? `(${detailModalItem.voucher_no})` : ''}
                 </h3>
               </div>
               <button
@@ -1242,6 +1299,10 @@ export const ReceivedTransactions = () => {
             </div>
 
             <div className="space-y-2.5">
+              <div className="flex justify-between py-1 border-b border-line/50">
+                <span className="text-slate">Voucher No.:</span>
+                <span className="font-mono text-ink text-right">{detailModalItem.voucher_no?.trim() || '—'}</span>
+              </div>
               <div className="flex justify-between py-1 border-b border-line/50">
                 <span className="text-slate">Item:</span>
                 <span className="font-semibold text-ink text-right">{detailModalItem.item_name}</span>
@@ -1259,7 +1320,7 @@ export const ReceivedTransactions = () => {
               <div className="flex justify-between py-1 border-b border-line/50">
                 <span className="text-slate">Date:</span>
                 <span className="font-mono text-ink text-right">
-                  {detailModalItem.date ? String(detailModalItem.date).split('T')[0] : '—'}
+                  {formatDate(detailModalItem.date)}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-line/50">

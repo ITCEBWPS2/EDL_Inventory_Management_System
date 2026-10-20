@@ -67,7 +67,7 @@ const reportController = {
           ...r,
           tx_type: 'Received',
           type_badge: 'In',
-          partner_or_disposition: r.from_whom
+          partner_or_disposition: r.from_whom?.trim() || '—'
         })));
       }
 
@@ -83,14 +83,21 @@ const reportController = {
 
       // Date filtering
       if (start_date) {
-        combined = combined.filter(t => new Date(t.date) >= new Date(start_date));
+        combined = combined.filter(t => t.date && new Date(t.date) >= new Date(start_date));
       }
       if (end_date) {
-        combined = combined.filter(t => new Date(t.date) <= new Date(end_date));
+        combined = combined.filter(t => t.date && new Date(t.date) <= new Date(end_date));
       }
 
-      // Sort chronological descending
-      combined.sort((a, b) => new Date(b.date) - new Date(a.date));
+      // Sort chronological descending (records with date first descending, dateless records last in stable order)
+      combined.sort((a, b) => {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        if (timeA !== timeB) return timeB - timeA;
+        const createA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const createB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return createB - createA;
+      });
 
       const totalReceivedQty = combined.filter(t => t.tx_type === 'Received').reduce((s, t) => s + Number(t.quantity), 0);
       const totalExpendedQty = combined.filter(t => t.tx_type === 'Expended').reduce((s, t) => s + Number(t.quantity), 0);

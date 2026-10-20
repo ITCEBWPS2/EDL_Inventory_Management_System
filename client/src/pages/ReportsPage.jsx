@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { formatDate, formatNumber, exportToCSV } from '../utils/formatters';
+import { DateInput } from '../components/common/DateInput';
 import { Download, Printer, Filter, BarChart2, ArrowUpDown, ShieldCheck } from 'lucide-react';
 
 export const ReportsPage = () => {
@@ -70,19 +71,20 @@ export const ReportsPage = () => {
     } else if (activeTab === 'transactions') {
       const csv = reportData.data.map(t => ({
         'Transaction Type': t.tx_type,
-        'Date': t.date,
-        'Voucher No': t.voucher_no,
+        'Date': formatDate(t.date),
+        'Voucher No': t.voucher_no || '',
         'Serial No.': t.item_code,
         'Item Name': t.item_name,
         'Quantity': t.quantity,
         'Destination/Partner': t.partner_or_disposition,
+        'Description': t.notes || '',
         'Unit': t.unit_name
       }));
       exportToCSV(csv, `EDL_Transactions_Report_${selectedUnit?.unit_code || 'All'}.csv`);
     } else if (activeTab === 'verification') {
       const csv = reportData.data.map(v => ({
         'Audit Year': v.year,
-        'Date': v.date,
+        'Date': formatDate(v.date),
         'Unit': v.unit_name,
         'Status': v.status,
         'Verifiers': (v.verified_by || []).join('; '),
@@ -194,22 +196,24 @@ export const ReportsPage = () => {
 
           <div className="flex items-center gap-2">
             <span className="font-medium text-ink">Start:</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-2 py-1 bg-surface border border-line rounded text-ink"
-            />
+            <div className="w-36">
+              <DateInput
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                placeholder="dd/mm/yyyy"
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="font-medium text-ink">End:</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="px-2 py-1 bg-surface border border-line rounded text-ink"
-            />
+            <div className="w-36">
+              <DateInput
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                placeholder="dd/mm/yyyy"
+              />
+            </div>
           </div>
 
           <button
@@ -313,6 +317,7 @@ export const ReportsPage = () => {
                 <th className="py-3 px-3">Serial No.</th>
                 <th className="py-3 px-3 text-right">Qty</th>
                 <th className="py-3 px-3">Destination / Source</th>
+                <th className="py-3 px-3">Description</th>
                 <th className="py-3 px-3">Unit</th>
               </tr>
             )}
@@ -332,13 +337,13 @@ export const ReportsPage = () => {
           <tbody className="divide-y divide-line">
             {loading ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-slate">
+                <td colSpan={activeTab === 'transactions' ? 9 : 8} className="py-12 text-center text-slate">
                   Generating verified audit report...
                 </td>
               </tr>
             ) : !reportData?.data?.length ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-slate">
+                <td colSpan={activeTab === 'transactions' ? 9 : 8} className="py-12 text-center text-slate">
                   No records matching the selected parameters.
                 </td>
               </tr>
@@ -362,13 +367,16 @@ export const ReportsPage = () => {
                     <>
                       <td className="py-2.5 px-3"><StatusBadge status={row.type_badge || row.tx_type} /></td>
                       <td className="py-2.5 px-3 text-slate">{formatDate(row.date)}</td>
-                      <td className="py-2.5 px-3 font-mono text-ink font-semibold">{row.voucher_no}</td>
+                      <td className="py-2.5 px-3 font-mono text-ink font-semibold">{row.voucher_no || '—'}</td>
                       <td className="py-2.5 px-3 font-medium text-ink">{row.item_name}</td>
                       <td className="py-2.5 px-3 font-mono text-slate">{row.item_code}</td>
                       <td className={`py-2.5 px-3 text-right font-bold tabular-nums ${row.tx_type === 'Expended' ? 'text-[#B4483A]' : 'text-[#2F7A5C]'}`}>
                         {row.tx_type === 'Expended' ? `-${row.quantity}` : `+${row.quantity}`}
                       </td>
                       <td className="py-2.5 px-3 text-slate">{row.partner_or_disposition}</td>
+                      <td className="py-2.5 px-3 text-slate text-[11px] max-w-[180px] truncate" title={row.notes || ''}>
+                        {row.notes && row.notes.trim() ? row.notes : '—'}
+                      </td>
                       <td className="py-2.5 px-3 text-slate text-[11px]">{row.unit_name}</td>
                     </>
                   )}

@@ -37,7 +37,8 @@ const ReceivedTransactionSchema = new mongoose.Schema(
     },
     date: {
       type: String,
-      required: true
+      default: '',
+      trim: true
     },
     unit_id: {
       type: String,
@@ -50,7 +51,7 @@ const ReceivedTransactionSchema = new mongoose.Schema(
     },
     voucher_no: {
       type: String,
-      required: true,
+      default: '',
       trim: true
     },
     serial_number: {

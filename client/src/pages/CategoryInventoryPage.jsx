@@ -246,9 +246,17 @@ export const CategoryInventoryPage = () => {
     const seqNo = itemIndex >= 0 ? itemIndex + 1 : 1;
 
     const currentVal = item.sub_classification || item.item_name || '';
+    const CHAIR_RENAME_MAP = {
+      'computer executive': 'Computer Executive Chair',
+      'computer typist': 'Computer Typist Chair',
+      'computer assistant': 'Computer Assistant Chair'
+    };
+    const mappedVal = CHAIR_RENAME_MAP[currentVal.toLowerCase().trim()] || currentVal;
     const matchedType = subMeta?.subTypeOptions?.find(opt =>
+      opt.toLowerCase() === mappedVal.toLowerCase() ||
       opt.toLowerCase() === currentVal.toLowerCase() ||
-      currentVal.toLowerCase().includes(opt.toLowerCase())
+      currentVal.toLowerCase().includes(opt.toLowerCase()) ||
+      opt.toLowerCase().includes(currentVal.toLowerCase())
     );
 
     const isCustom = subMeta?.subTypeOptions && !matchedType;
@@ -451,11 +459,18 @@ export const CategoryInventoryPage = () => {
       ? [{
           header: typeLabel,
           accessor: 'sub_classification',
-          render: (row) => (
-            <span className="font-medium text-ink">
-              {row.sub_classification || row.item_name}
-            </span>
-          )
+          render: (row) => {
+            const val = row.sub_classification || row.item_name || '';
+            const normalized = val === 'Computer Executive' ? 'Computer Executive Chair'
+              : val === 'Computer Typist' ? 'Computer Typist Chair'
+              : val === 'Computer Assistant' ? 'Computer Assistant Chair'
+              : val;
+            return (
+              <span className="font-medium text-ink">
+                {normalized}
+              </span>
+            );
+          }
         }]
       : [{
           header: 'Category',

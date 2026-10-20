@@ -1,7 +1,17 @@
 const db = require('../services/db');
 const storageService = require('../services/storageService');
+const env = require('../config/env');
 
 const transactionController = {
+  getConfig(req, res) {
+    return res.json({
+      success: true,
+      data: {
+        require_received_sender: Boolean(env.REQUIRE_RECEIVED_SENDER)
+      }
+    });
+  },
+
   // ==========================================
   // RECEIVED TRANSACTIONS
   // ==========================================
@@ -44,10 +54,14 @@ const transactionController = {
       let { item_name, item_id, category, category_id, quantity, date, unit_id, voucher_no, serial_number, from_whom, notes } = req.body;
 
       const trimmedName = (item_name || item_id || '').trim();
-      if (!trimmedName || !quantity || !unit_id || !voucher_no || !from_whom) {
+      const trimmedSender = (from_whom !== undefined && from_whom !== null) ? String(from_whom).trim() : '';
+
+      if (!trimmedName || !quantity || !unit_id || (env.REQUIRE_RECEIVED_SENDER && !trimmedSender)) {
         return res.status(400).json({
           success: false,
-          message: 'Item name, quantity, unit, voucher number, and sender (from whom) are required.'
+          message: env.REQUIRE_RECEIVED_SENDER
+            ? 'Item name, quantity, unit, and sender (from whom) are required.'
+            : 'Item name, quantity, and unit are required.'
         });
       }
 
@@ -63,24 +77,30 @@ const transactionController = {
         if (found) categoryName = found.name;
       }
 
+      const cleanDate = (date !== undefined && date !== null) ? String(date).trim() : '';
+      const cleanVoucherNo = (voucher_no !== undefined && voucher_no !== null) ? String(voucher_no).trim() : '';
+
       let voucher_image_path = null;
       if (req.file) {
-        voucher_image_path = await storageService.uploadVoucher(req.file, voucher_no);
+        voucher_image_path = await storageService.uploadVoucher(req.file, cleanVoucherNo || Date.now());
       } else if (req.body.voucher_image_path) {
         voucher_image_path = req.body.voucher_image_path;
       }
 
+      const validItemId = (item_id && typeof item_id === 'string' && item_id.match(/^[0-9a-f-]{36}$/i)) ? item_id : null;
+
       const newTx = await db.createReceivedTransaction({
+        item_id: validItemId,
         item_name: trimmedName,
         category: categoryName,
         category_id: category_id || null,
         quantity: Number(quantity),
-        date: date || new Date().toISOString().split('T')[0],
+        date: cleanDate,
         unit_id,
         voucher_image_path,
-        voucher_no,
+        voucher_no: cleanVoucherNo,
         serial_number: serial_number || null,
-        from_whom,
+        from_whom: trimmedSender,
         notes: notes || '',
         created_by: req.user.id
       });
@@ -106,16 +126,28 @@ const transactionController = {
         voucher_image_path = await storageService.uploadVoucher(req.file, id);
       }
 
+      if (env.REQUIRE_RECEIVED_SENDER && from_whom !== undefined && !String(from_whom).trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Sender (from whom) is required.'
+        });
+      }
+
       const targetName = (item_name || item_id || '').trim();
+      const cleanItemId = (item_id !== undefined) ? ((item_id && typeof item_id === 'string' && item_id.match(/^[0-9a-f-]{36}$/i)) ? item_id : null) : undefined;
+      const cleanDate = date !== undefined ? ((date !== null && typeof date === 'string') ? date.trim() : (date || '')) : undefined;
+      const cleanVoucherNo = voucher_no !== undefined ? ((voucher_no !== null && typeof voucher_no === 'string') ? voucher_no.trim() : (voucher_no || '')) : undefined;
+      const cleanSender = from_whom !== undefined ? ((from_whom !== null && typeof from_whom === 'string') ? from_whom.trim() : (from_whom || '')) : undefined;
       const updates = {
         ...(targetName ? { item_name: targetName } : {}),
+        ...(cleanItemId !== undefined ? { item_id: cleanItemId } : {}),
         ...(category ? { category } : {}),
         ...(category_id ? { category_id } : {}),
         quantity: quantity !== undefined ? Number(quantity) : undefined,
-        date,
-        voucher_no,
+        ...(cleanDate !== undefined ? { date: cleanDate } : {}),
+        ...(cleanVoucherNo !== undefined ? { voucher_no: cleanVoucherNo } : {}),
         serial_number,
-        from_whom,
+        ...(cleanSender !== undefined ? { from_whom: cleanSender } : {}),
         notes
       };
       if (voucher_image_path) updates.voucher_image_path = voucher_image_path;
@@ -235,7 +267,7 @@ const transactionController = {
         unit_id,
         voucher_no,
         disposition,
-        notes: notes || '',
+        notes: typeof notes === 'string' ? notes.trim() : (notes || ''),
         created_by: req.user.id
       });
 
@@ -266,7 +298,7 @@ const transactionController = {
         date,
         voucher_no,
         disposition,
-        notes
+        notes: notes !== undefined ? (typeof notes === 'string' ? notes.trim() : notes) : undefined
       });
       if (!updated) {
         return res.status(404).json({ success: false, message: 'Transaction not found.' });

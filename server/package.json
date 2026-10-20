@@ -13,7 +13,9 @@
     "migrate:unit-locations": "node src/scripts/migrate-unit-locations.js",
     "migrate:unit-codes": "node src/scripts/migrate-unit-codes.js",
     "import:backup": "node src/scripts/import-backup.js",
-    "cleanup:junk-item": "node src/scripts/remove-junk-item.js"
+    "cleanup:junk-item": "node src/scripts/remove-junk-item.js",
+    "migrate:chair-types": "node src/scripts/migrate-chair-type-names.js",
+    "cleanup:received-dates": "node src/scripts/clear-autofilled-received-dates.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -67,6 +67,174 @@ const verificationController = {
     }
   },
 
+  async getVerificationInventoryItems(req, res) {
+    try {
+      const { unit_id } = req.query;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const rows = await db.getInventoryItemsForVerification(unit_id);
+      return res.json({ success: true, data: rows });
+    } catch (error) {
+      console.error('Get verification inventory items error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to fetch inventory items for verification.' });
+    }
+  },
+
+  async getDraftVerification(req, res) {
+    try {
+      const { unit_id } = req.query;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const draft = await db.getDraftVerification(unit_id);
+      return res.json({ success: true, data: draft });
+    } catch (error) {
+      console.error('Get draft verification error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to fetch draft verification.' });
+    }
+  },
+
+  async saveDraftHeader(req, res) {
+    try {
+      const { unit_id, date, year, verifier_1, verifier_2, verifier_3, verified_by, summary } = req.body;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const draft = await db.saveDraftHeader({
+        unit_id,
+        date,
+        year,
+        verifier_1,
+        verifier_2,
+        verifier_3,
+        verified_by,
+        summary,
+        user_id: req.user.id
+      });
+      return res.json({ success: true, data: draft, message: 'Draft header updated.' });
+    } catch (error) {
+      console.error('Save draft header error:', error);
+      return res.status(500).json({ success: false, message: error.message || 'Failed to save draft header.' });
+    }
+  },
+
+  async saveDraftItem(req, res) {
+    try {
+      const { itemId } = req.params;
+      const { unit_id, rowData, headerData } = req.body;
+
+      if (!unit_id || !itemId) {
+        return res.status(400).json({ success: false, message: 'unit_id and itemId are required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const result = await db.saveDraftItem({
+        unit_id,
+        item_id: itemId,
+        rowData: rowData || {},
+        headerData: headerData || {},
+        user_id: req.user.id
+      });
+
+      return res.json({
+        success: true,
+        data: result,
+        message: 'Item saved to draft.'
+      });
+    } catch (error) {
+      console.error('Save draft item error:', error);
+      return res.status(400).json({ success: false, message: error.message || 'Failed to save draft item.' });
+    }
+  },
+
+  async saveDraftAllItems(req, res) {
+    try {
+      const { unit_id, items, headerData } = req.body;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const result = await db.saveDraftAllItems({
+        unit_id,
+        items: Array.isArray(items) ? items : [],
+        headerData: headerData || {},
+        user_id: req.user.id
+      });
+
+      return res.json({
+        success: true,
+        data: result,
+        message: `${result.savedCount} item(s) saved to draft.`
+      });
+    } catch (error) {
+      console.error('Save all draft items error:', error);
+      return res.status(500).json({ success: false, message: error.message || 'Failed to save draft items.' });
+    }
+  },
+
+  async discardDraft(req, res) {
+    try {
+      const { unit_id } = req.query;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const discarded = await db.discardDraft(unit_id);
+      return res.json({
+        success: true,
+        message: discarded ? 'Draft verification discarded successfully.' : 'No active draft found to discard.'
+      });
+    } catch (error) {
+      console.error('Discard draft error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to discard draft verification.' });
+    }
+  },
+
   async createVerification(req, res) {
     try {
       const { unit_id, date, year, verified_by, verifier_1, verifier_2, verifier_3, summary, status, items } = req.body;
@@ -100,13 +268,18 @@ const verificationController = {
       // If items not provided in payload, populate automatically from current unit inventory
       let verificationItems = items;
       if (!verificationItems || verificationItems.length === 0) {
-        const unitRemaining = await db.getRemainingInventory([unit_id]);
-        verificationItems = unitRemaining.map(r => ({
+        const invRows = await db.getInventoryItemsForVerification(unit_id);
+        verificationItems = invRows.map(r => ({
+          item_id: r.inventory_item_id,
           item_code: r.item_code,
+          serial_numbers: r.serial_numbers || (r.item_code ? [r.item_code] : []),
+          manufacturer_sn: r.manufacturer_sn,
+          manufacturer_serial_numbers: r.manufacturer_serial_numbers || (r.manufacturer_sn ? [r.manufacturer_sn] : []),
+          is_batch: r.is_batch,
           item_name: r.item_name,
           category: r.category,
-          system_qty: r.remaining_qty,
-          physical_qty: r.remaining_qty,
+          system_qty: r.system_qty,
+          physical_qty: r.system_qty,
           condition: 'Good',
           label_no: '',
           remarks: '',
@@ -253,9 +426,31 @@ const verificationController = {
     }
   },
 
+  async getIssuedDestroyedCandidates(req, res) {
+    try {
+      const { unit_id } = req.query;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const candidates = await db.getIssuedDestroyedCandidates(unit_id);
+      return res.json({ success: true, data: candidates });
+    } catch (error) {
+      console.error('Get issued destroyed candidates error:', error);
+      return res.status(500).json({ success: false, message: error.message || 'Failed to fetch candidate items.' });
+    }
+  },
+
   async createIssuedDestroyed(req, res) {
     try {
-      const { item_id, serial_number, quantity, disposition, reason, date, verification_id } = req.body;
+      const { item_id, serial_number, serial_numbers, quantity, disposition, reason, date, verification_id } = req.body;
 
       if (!item_id || quantity === undefined || quantity === null || !disposition || !date) {
         return res.status(400).json({
@@ -292,7 +487,8 @@ const verificationController = {
       const record = await db.createIssuedDestroyedItem({
         item_id,
         unit_id: item.unit_id,
-        serial_number: serial_number || null,
+        serial_number: serial_number || (Array.isArray(serial_numbers) ? serial_numbers[0] : null),
+        serial_numbers: Array.isArray(serial_numbers) ? serial_numbers : (serial_number ? [serial_number] : []),
         quantity: numQty,
         disposition,
         reason: reason || '',
@@ -307,7 +503,7 @@ const verificationController = {
       });
     } catch (error) {
       console.error('Create issued/destroyed error:', error);
-      return res.status(500).json({ success: false, message: 'Failed to record write-off.' });
+      return res.status(400).json({ success: false, message: error.message || 'Failed to record write-off.' });
     }
   },
 
@@ -326,7 +522,7 @@ const verificationController = {
         }
       }
 
-      const { item_id, serial_number, quantity, disposition, reason, date, verification_id } = req.body;
+      const { item_id, serial_number, serial_numbers, quantity, disposition, reason, date, verification_id } = req.body;
 
       const targetItemId = item_id || existing.item_id;
       const targetItem = await db.getInventoryItemById(targetItemId);
@@ -362,6 +558,7 @@ const verificationController = {
         item_id: targetItemId,
         unit_id: targetItem.unit_id,
         serial_number: serial_number !== undefined ? serial_number : existing.serial_number,
+        serial_numbers: serial_numbers !== undefined ? serial_numbers : existing.serial_numbers,
         quantity: numQty,
         disposition: disposition || existing.disposition,
         reason: reason !== undefined ? reason : existing.reason,
@@ -376,7 +573,7 @@ const verificationController = {
       });
     } catch (error) {
       console.error('Update issued destroyed error:', error);
-      return res.status(500).json({ success: false, message: 'Failed to update record.' });
+      return res.status(400).json({ success: false, message: error.message || 'Failed to update record.' });
     }
   },
 

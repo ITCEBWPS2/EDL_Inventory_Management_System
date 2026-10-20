@@ -11,6 +11,9 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
 });
 
+// Public or authenticated config endpoint for transaction settings
+router.get('/config', transactionController.getConfig);
+
 router.use(requireAuth);
 
 // Remaining Inventory (Strictly Read-Only, never directly editable)

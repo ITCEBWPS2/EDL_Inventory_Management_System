@@ -8,6 +8,8 @@ import { AppShell } from '../components/layout/AppShell';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { BackButton } from '../components/common/BackButton';
 import { ConfirmModal } from '../components/common/ConfirmModal';
+import { SerialNumberCell } from '../components/verification/SerialNumberCell';
+import { formatDate } from '../utils/formatters';
 
 export const IssuedDestroyedPage = () => {
   const { selectedUnitId, canWrite } = useAuth();
@@ -57,7 +59,6 @@ export const IssuedDestroyedPage = () => {
   return (
     <AppShell
       breadcrumbs={[
-        { label: 'Dashboard', path: '/' },
         { label: 'Annual Verification', path: '/annual-verification' },
         { label: 'Issued / Destroyed Items' }
       ]}
@@ -78,7 +79,7 @@ export const IssuedDestroyedPage = () => {
             <thead>
               <tr className="border-b border-line bg-surface/70 text-slate font-semibold text-[11px] uppercase tracking-wider">
                 <th className="py-3 px-4 w-12 text-center">No</th>
-                <th className="py-3 px-4">Serial No.</th>
+                <th className="py-3 px-4 min-w-[320px] w-[340px]">Serial No.</th>
                 <th className="py-3 px-4">Item Name</th>
                 <th className="py-3 px-4 text-center">Qty</th>
                 <th className="py-3 px-4">Disposition</th>
@@ -108,13 +109,16 @@ export const IssuedDestroyedPage = () => {
                     className="hover:bg-surface/60 transition-colors group"
                   >
                     {/* No */}
-                    <td className="py-3 px-4 text-center text-slate tabular-nums font-medium">
+                    <td className="py-3 px-4 text-center text-slate tabular-nums font-medium align-top">
                       {idx + 1}
                     </td>
 
-                    {/* Serial No. */}
-                    <td className="py-3 px-4 font-mono text-xs text-ink font-medium whitespace-nowrap">
-                      {row.serial_number || row.item_code || '—'}
+                    {/* Serial No. (stacked, one per line, collapsed with '+ N more' after 3) */}
+                    <td className="py-3 px-4 align-top min-w-[320px] w-[340px]">
+                      <SerialNumberCell
+                        serialNumbers={row.serial_numbers}
+                        singleSerial={row.serial_number || row.item_code}
+                      />
                     </td>
 
                     {/* Item Name */}
@@ -136,7 +140,7 @@ export const IssuedDestroyedPage = () => {
 
                     {/* Date */}
                     <td className="py-3 px-4 whitespace-nowrap text-slate tabular-nums">
-                      {row.date}
+                      {formatDate(row.date)}
                     </td>
 
                     {/* Reason (wraps to two lines) */}

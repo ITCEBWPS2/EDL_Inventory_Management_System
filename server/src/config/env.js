@@ -7,4 +7,5 @@ module.exports = {
   JWT_SECRET: process.env.JWT_SECRET || process.env.JWT_DEV_FALLBACK_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'edl_ims_secure_jwt_secret_dev_key_2026'),
   JWT_DEV_FALLBACK_SECRET: process.env.JWT_DEV_FALLBACK_SECRET || 'edl_ims_secure_jwt_secret_dev_key_2026',
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/edl_ims',
+  REQUIRE_RECEIVED_SENDER: process.env.REQUIRE_RECEIVED_SENDER === 'true',
 };
