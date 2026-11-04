@@ -32,7 +32,8 @@ In `server/.env`:
 ```env
 PORT=5000
 NODE_ENV=development
-CLIENT_URL=http://localhost:5173
+# Comma-separated list of allowed frontend origins:
+CLIENT_URL=http://localhost:5173,http://localhost:5174
 JWT_SECRET=your_jwt_secret_key
 MONGODB_URI=mongodb://127.0.0.1:27017/edl_ims
 ```

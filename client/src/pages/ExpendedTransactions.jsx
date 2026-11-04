@@ -398,7 +398,7 @@ export const ExpendedTransactions = () => {
     }
 
     if (!formData.disposition.trim()) {
-      toast.error('Please specify how the item was disposed of.');
+      toast.error('Please specify to whom the item was issued.');
       return;
     }
 
@@ -561,7 +561,7 @@ export const ExpendedTransactions = () => {
                 <th className="py-3 px-4">Voucher No</th>
                 <th className="py-3 px-4">Item</th>
                 <th className="py-3 px-4 text-center">Qty</th>
-                <th className="py-3 px-4">How Disposed Of</th>
+                <th className="py-3 px-4">To Whom Issued</th>
                 <th className="py-3 px-4">Description</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -618,7 +618,7 @@ export const ExpendedTransactions = () => {
                         {row.quantity}
                       </td>
 
-                      {/* 6. How Disposed Of — short destination/recipient value */}
+                      {/* 6. To Whom Issued — short destination/recipient value */}
                       <td className="py-3.5 px-4 font-medium text-ink">
                         {row.disposition || '—'}
                       </td>
@@ -802,10 +802,10 @@ export const ExpendedTransactions = () => {
             )}
           </div>
 
-          {/* Row 4: How Disposed Of */}
+          {/* Row 4: To Whom Issued */}
           <div>
             <label className="block font-medium text-ink mb-1">
-              How Disposed Of <span className="text-[#B4483A]">*</span>
+              To Whom Issued <span className="text-[#B4483A]">*</span>
             </label>
             {isCustomDisposition ? (
               <div className="flex gap-2">

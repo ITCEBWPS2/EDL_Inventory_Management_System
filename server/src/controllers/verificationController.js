@@ -47,7 +47,7 @@ const verificationController = {
 
   async getHistoryItems(req, res) {
     try {
-      const { unit_id, year } = req.query;
+      const { unit_id, year, include_not_counted } = req.query;
       let targetUnits = null;
       if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
         const authorized = req.user.unitIds || [];
@@ -59,7 +59,8 @@ const verificationController = {
         targetUnits = [unit_id];
       }
 
-      const list = await db.getVerificationHistoryItems(targetUnits, year);
+      const shouldIncludeNotCounted = include_not_counted === 'true' || include_not_counted === true;
+      const list = await db.getVerificationHistoryItems(targetUnits, year, shouldIncludeNotCounted);
       return res.json({ success: true, data: list });
     } catch (error) {
       console.error('Get verification history items error:', error);
@@ -279,8 +280,8 @@ const verificationController = {
           item_name: r.item_name,
           category: r.category,
           system_qty: r.system_qty,
-          physical_qty: r.system_qty,
-          condition: 'Good',
+          physical_qty: null,
+          condition: '—',
           label_no: '',
           remarks: '',
           status: 'Not Counted'

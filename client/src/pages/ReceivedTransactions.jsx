@@ -1200,7 +1200,7 @@ export const ReceivedTransactions = () => {
                         className="w-full text-left px-3 py-2 text-xs font-semibold text-signal hover:bg-card rounded transition-colors flex items-center gap-1.5"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>+ Enter Custom Sender Name...</span>
+                        <span>Enter Custom Sender Name...</span>
                       </button>
                     </div>
                   </div>

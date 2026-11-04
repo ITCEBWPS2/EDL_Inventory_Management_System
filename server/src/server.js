@@ -16,13 +16,38 @@ const vouchersRoutes = require('./routes/vouchers.routes');
 
 const app = express();
 
-// Middleware
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', env.CLIENT_URL],
+// Dynamic CORS configuration supporting multi-origin lists and dev localhost wildcard
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. curl, tests, server-to-server, mobile apps)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Support multiple allowed origins configured via comma-separated CLIENT_URL
+    const configuredOrigins = (env.CLIENT_URL || '')
+      .split(',')
+      .map(url => url.trim())
+      .filter(Boolean);
+
+    // In development/test mode, allow any localhost or 127.0.0.1 on any port
+    const isLocalhost = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    const isDevAllowed = env.NODE_ENV !== 'production' && isLocalhost;
+
+    if (isDevAllowed || configuredOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Reject unknown origins without throwing a 500 error (respond without CORS headers)
+    return callback(null, false);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

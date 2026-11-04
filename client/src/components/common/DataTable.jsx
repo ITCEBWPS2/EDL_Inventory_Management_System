@@ -1,5 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Filter, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Search, Plus, Filter, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown, Printer } from 'lucide-react';
+import { IndeterminateCheckbox } from './IndeterminateCheckbox';
+import { PrintLabelsActionBar } from '../inventory/PrintLabelsActionBar';
+import { PrintLabelsModal } from '../inventory/PrintLabelsModal';
+import {
+  getItemSerials,
+  isItemSelectable,
+  getBatchSelectionStatus,
+  toggleBatchSerials,
+  toggleSingleSerial,
+  selectAllFilteredSerials,
+  resolvePrintItems
+} from '../../utils/selectionHelper';
+import { isBatchItem } from '../../utils/serialNumberGenerator';
+import { getBatchSerialList } from '../inventory/BatchSerialSubTable';
 
 export const DataTable = ({
   columns = [],
@@ -20,7 +34,8 @@ export const DataTable = ({
   emptyMessage = 'No records found',
   renderExpandedRow = null,
   isRowExpandable = null,
-  expandColumn = false
+  expandColumn = false,
+  enableSerialSelection = false // Enable serial label selection & printing
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('');
@@ -28,6 +43,11 @@ export const DataTable = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState({});
   const pageSize = 10;
+
+  // Serial Label Selection State (persists across search/filter and pagination)
+  const [selectedSerials, setSelectedSerials] = useState(() => new Set());
+  const [lastClickedIndex, setLastClickedIndex] = useState(null);
+  const [modalPrintItems, setModalPrintItems] = useState(null); // Items passed to PrintLabelsModal
 
   const toggleRowExpand = (key) => {
     setExpandedRows(prev => ({
@@ -46,42 +66,46 @@ export const DataTable = ({
   };
 
   // Local filtering
-  const filteredData = data.filter(row => {
-    // Filter by dropdown
-    if (selectedFilter && filterKey && row[filterKey] !== selectedFilter) {
-      return false;
-    }
-    // Search query
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase().trim();
-      if (selectedSearchField && selectedSearchField !== 'all') {
-        if (selectedSearchField === 'type') {
-          const typeVal = String(row.sub_classification || row.item_name || '').toLowerCase();
-          if (!typeVal.includes(q)) return false;
-        } else if (selectedSearchField === 'item_code') {
-          const codeVal = String(row.item_code || '').toLowerCase();
-          const batchLabel = String(row.batch_label || '').toLowerCase();
-          const serialMatch = Array.isArray(row.serial_numbers) && row.serial_numbers.some(s => String(s).toLowerCase().includes(q));
-          if (!codeVal.includes(q) && !batchLabel.includes(q) && !serialMatch) return false;
-        } else {
-          const val = String(row[selectedSearchField] || '').toLowerCase();
-          if (!val.includes(q)) return false;
-        }
-      } else {
-        const hasMatch = Object.values(row).some(val => 
-          val && String(val).toLowerCase().includes(q)
-        ) || (row.batch_label && String(row.batch_label).toLowerCase().includes(q))
-          || (Array.isArray(row.serial_numbers) && row.serial_numbers.some(s => String(s).toLowerCase().includes(q)));
-        if (!hasMatch) return false;
+  const filteredData = useMemo(() => {
+    return data.filter(row => {
+      // Filter by dropdown
+      if (selectedFilter && filterKey && row[filterKey] !== selectedFilter) {
+        return false;
       }
-    }
-    return true;
-  });
+      // Search query
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase().trim();
+        if (selectedSearchField && selectedSearchField !== 'all') {
+          if (selectedSearchField === 'type') {
+            const typeVal = String(row.sub_classification || row.item_name || '').toLowerCase();
+            if (!typeVal.includes(q)) return false;
+          } else if (selectedSearchField === 'item_code') {
+            const codeVal = String(row.item_code || '').toLowerCase();
+            const batchLabel = String(row.batch_label || '').toLowerCase();
+            const serialMatch = Array.isArray(row.serial_numbers) && row.serial_numbers.some(s => String(s).toLowerCase().includes(q));
+            if (!codeVal.includes(q) && !batchLabel.includes(q) && !serialMatch) return false;
+          } else {
+            const val = String(row[selectedSearchField] || '').toLowerCase();
+            if (!val.includes(q)) return false;
+          }
+        } else {
+          const hasMatch = Object.values(row).some(val =>
+            val && String(val).toLowerCase().includes(q)
+          ) || (row.batch_label && String(row.batch_label).toLowerCase().includes(q))
+            || (Array.isArray(row.serial_numbers) && row.serial_numbers.some(s => String(s).toLowerCase().includes(q)));
+          if (!hasMatch) return false;
+        }
+      }
+      return true;
+    });
+  }, [data, selectedFilter, filterKey, searchTerm, selectedSearchField]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / pageSize) || 1;
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedData = filteredData.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+  const paginatedData = useMemo(() => {
+    return filteredData.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+  }, [filteredData, safeCurrentPage, pageSize]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -89,20 +113,157 @@ export const DataTable = ({
     }
   }, [totalPages, currentPage]);
 
+  // Lookup map for serial -> { itemName, itemId }
+  const serialMetadataMap = useMemo(() => {
+    const map = new Map();
+    (data || []).forEach(item => {
+      const serials = getItemSerials(item);
+      const itemName = item.sub_classification || item.item_name || '';
+      serials.forEach(s => {
+        map.set(s, { itemName, itemId: item.id });
+      });
+    });
+    return map;
+  }, [data]);
+
+  // Collect all valid serial numbers in the current filtered data
+  const totalFilteredSerialsCount = useMemo(() => {
+    if (!enableSerialSelection) return 0;
+    return filteredData.reduce((acc, row) => acc + getItemSerials(row).length, 0);
+  }, [filteredData, enableSerialSelection]);
+
+  // Current page serial selection status
+  const { isCurrentPageAllSelected, isCurrentPageSomeSelected } = useMemo(() => {
+    if (!enableSerialSelection || paginatedData.length === 0) {
+      return { isCurrentPageAllSelected: false, isCurrentPageSomeSelected: false };
+    }
+    const pageSerials = paginatedData.flatMap(row => getItemSerials(row));
+    if (pageSerials.length === 0) {
+      return { isCurrentPageAllSelected: false, isCurrentPageSomeSelected: false };
+    }
+    let count = 0;
+    for (const s of pageSerials) {
+      if (selectedSerials.has(s)) count++;
+    }
+    return {
+      isCurrentPageAllSelected: count === pageSerials.length,
+      isCurrentPageSomeSelected: count > 0
+    };
+  }, [enableSerialSelection, paginatedData, selectedSerials]);
+
+  // Handlers for selection
+  const handleTogglePageSelection = () => {
+    const pageSerials = paginatedData.flatMap(row => getItemSerials(row));
+    if (pageSerials.length === 0) return;
+
+    setSelectedSerials(prev => {
+      const next = new Set(prev);
+      if (isCurrentPageAllSelected) {
+        // Deselect all on current page
+        pageSerials.forEach(s => next.delete(s));
+      } else {
+        // Select all on current page
+        pageSerials.forEach(s => next.add(s));
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSingleSerial = (serial) => {
+    setSelectedSerials(prev => toggleSingleSerial(serial, prev));
+  };
+
+  const handleToggleBatchRow = (item) => {
+    setSelectedSerials(prev => toggleBatchSerials(item, prev));
+  };
+
+  const handleRowCheckboxChange = (row, globalIdx, event) => {
+    const serials = getItemSerials(row);
+    if (!serials.length) return;
+
+    const isShiftKey = event?.nativeEvent?.shiftKey || false;
+
+    if (isShiftKey && lastClickedIndex !== null && lastClickedIndex !== globalIdx) {
+      // Range selection
+      const start = Math.min(lastClickedIndex, globalIdx);
+      const end = Math.max(lastClickedIndex, globalIdx);
+      const rangeRows = filteredData.slice(start, end + 1);
+
+      setSelectedSerials(prev => {
+        const next = new Set(prev);
+        // Determine whether target is now being checked
+        const targetStatus = getBatchSelectionStatus(row, prev);
+        const shouldSelect = targetStatus !== 'checked';
+
+        rangeRows.forEach(r => {
+          const rSerials = getItemSerials(r);
+          rSerials.forEach(s => {
+            if (shouldSelect) next.add(s);
+            else next.delete(s);
+          });
+        });
+        return next;
+      });
+    } else {
+      // Single row toggle
+      setSelectedSerials(prev => toggleBatchSerials(row, prev));
+    }
+    setLastClickedIndex(globalIdx);
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedSerials(prev => selectAllFilteredSerials(filteredData, prev));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedSerials(new Set());
+    setLastClickedIndex(null);
+  };
+
+  const handleOpenPrintModal = (itemsToPrint = null) => {
+    if (itemsToPrint && itemsToPrint.length > 0) {
+      setModalPrintItems(itemsToPrint);
+    } else {
+      const resolved = resolvePrintItems(data, selectedSerials, serialMetadataMap);
+      setModalPrintItems(resolved);
+    }
+  };
+
+  const handlePrintSingle = (row) => {
+    const serial = row.item_code?.trim();
+    if (!serial) return;
+    setModalPrintItems([{
+      serial,
+      itemName: row.sub_classification || row.item_name || '',
+      itemId: row.id
+    }]);
+  };
+
+  const handlePrintBatch = (row) => {
+    const serials = getBatchSerialList(row);
+    const itemName = row.sub_classification || row.item_name || '';
+    setModalPrintItems(serials.map(s => ({
+      serial: s,
+      itemName,
+      itemId: row.id
+    })));
+  };
+
   // Dynamic placeholder based on selected search field
   const activeSearchFieldLabel = searchFieldOptions.find(o => o.value === selectedSearchField)?.label;
   const dynamicPlaceholder = selectedSearchField === 'item_code'
     ? 'Search by Serial No...'
     : selectedSearchField === 'type'
-    ? `Search by ${activeSearchFieldLabel || 'Type'}...`
-    : searchPlaceholder;
+      ? `Search by ${activeSearchFieldLabel || 'Type'}...`
+      : searchPlaceholder;
 
-  const totalColSpan = columns.length + (expandColumn ? 1 : 0) + ((onEdit || onDelete) ? 1 : 0);
+  const showActionsColumn = Boolean(onEdit || onDelete || enableSerialSelection);
+  const totalColSpan = columns.length + (expandColumn ? 1 : 0) + (enableSerialSelection ? 1 : 0) + (showActionsColumn ? 1 : 0);
 
   return (
     <div className="relative bg-card rounded-xl border border-line shadow-card overflow-hidden">
       {/* Top Filter & Search Bar */}
-      <div className="p-4 border-b border-line flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface/50">
+      <div className="p-4 border-b border-line flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface/50 no-print">
         <div className="flex items-center gap-3 w-full sm:w-auto flex-1">
           {/* Search box */}
           <div className="relative flex-1 max-w-sm">
@@ -119,7 +280,7 @@ export const DataTable = ({
             />
           </div>
 
-          {/* Search Field Filter Dropdown (e.g. All Fields / Item Code / Chair Type) */}
+          {/* Search Field Filter Dropdown */}
           {searchFieldOptions.length > 0 && (
             <div className="relative">
               <select
@@ -176,18 +337,33 @@ export const DataTable = ({
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-line bg-surface/80 text-[11px] font-semibold text-slate tracking-wider uppercase">
+              {/* Checkbox Column */}
+              {enableSerialSelection && (
+                <th className="py-3 px-3 w-10 text-center shrink-0">
+                  <IndeterminateCheckbox
+                    checked={isCurrentPageAllSelected}
+                    indeterminate={isCurrentPageSomeSelected && !isCurrentPageAllSelected}
+                    onChange={handleTogglePageSelection}
+                    title={isCurrentPageAllSelected ? 'Deselect all on this page' : 'Select all on this page'}
+                    aria-label="Select all on this page"
+                  />
+                </th>
+              )}
+
               {expandColumn && (
                 <th className="py-3 px-2 w-10 text-center"></th>
               )}
+
               {columns.map((col, idx) => (
                 <th
                   key={idx}
-                  className={`py-3 px-4 ${idx === 0 && !expandColumn ? 'sticky-col bg-surface/90' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
+                  className={`py-3 px-4 ${idx === 0 && !expandColumn && !enableSerialSelection ? 'sticky-col bg-surface/90' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
                 >
                   {col.header}
                 </th>
               ))}
-              {(onEdit || onDelete) && (
+
+              {showActionsColumn && (
                 <th className="py-3 px-4 text-right">Actions</th>
               )}
             </tr>
@@ -208,17 +384,42 @@ export const DataTable = ({
               </tr>
             ) : (
               paginatedData.map((row, rowIdx) => {
+                const globalRowIdx = (safeCurrentPage - 1) * pageSize + rowIdx;
                 const rowKey = row.id || `row-${rowIdx}`;
                 const canExpand = renderExpandedRow && checkRowExpandable(row);
                 const isExpanded = Boolean(expandedRows[rowKey]);
+                const isBatch = Boolean(checkRowExpandable(row));
+                const batchStatus = enableSerialSelection
+                  ? getBatchSelectionStatus(row, selectedSerials)
+                  : 'unchecked';
+                const isRowChecked = batchStatus === 'checked';
 
                 return (
                   <React.Fragment key={rowKey}>
                     <tr
-                      className={`hover:bg-surface/60 transition-colors group ${
-                        isExpanded ? 'bg-surface/40' : ''
-                      }`}
+                      className={`hover:bg-surface/60 transition-colors group ${isExpanded ? 'bg-surface/40' : ''
+                        } ${isRowChecked ? 'bg-signal/5' : ''}`}
                     >
+                      {/* Checkbox Cell */}
+                      {enableSerialSelection && (
+                        <td className="py-3 px-3 text-center shrink-0 w-10">
+                          <IndeterminateCheckbox
+                            checked={isRowChecked}
+                            indeterminate={batchStatus === 'indeterminate'}
+                            disabled={batchStatus === 'disabled'}
+                            title={
+                              batchStatus === 'disabled'
+                                ? 'No serial number assigned'
+                                : isBatch
+                                  ? 'Select all batch serials'
+                                  : 'Select serial'
+                            }
+                            aria-label={`Select item ${row.item_name || row.item_code}`}
+                            onChange={(e) => handleRowCheckboxChange(row, globalRowIdx, e)}
+                          />
+                        </td>
+                      )}
+
                       {expandColumn && (
                         <td className="py-3 px-2 text-center shrink-0 w-10">
                           {canExpand ? (
@@ -228,9 +429,8 @@ export const DataTable = ({
                                 e.stopPropagation();
                                 toggleRowExpand(rowKey);
                               }}
-                              className={`p-1 rounded hover:bg-surface text-slate hover:text-signal transition-transform duration-150 inline-flex items-center justify-center ${
-                                isExpanded ? 'rotate-90 text-signal font-bold' : ''
-                              }`}
+                              className={`p-1 rounded hover:bg-surface text-slate hover:text-signal transition-transform duration-150 inline-flex items-center justify-center ${isExpanded ? 'rotate-90 text-signal font-bold' : ''
+                                }`}
                               title={isExpanded ? 'Collapse batch serials' : 'Expand batch serials'}
                             >
                               <ChevronRight className="w-4 h-4" />
@@ -240,25 +440,53 @@ export const DataTable = ({
                           )}
                         </td>
                       )}
+
                       {columns.map((col, colIdx) => (
                         <td
                           key={colIdx}
-                          className={`py-3 px-4 ${
-                            colIdx === 0 && !renderExpandedRow ? 'sticky-col bg-card group-hover:bg-surface/90 font-medium' : ''
-                          } ${col.tabular ? 'tabular-nums' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
+                          className={`py-3 px-4 ${colIdx === 0 && !renderExpandedRow && !enableSerialSelection
+                              ? 'sticky-col bg-card group-hover:bg-surface/90 font-medium'
+                              : ''
+                            } ${col.tabular ? 'tabular-nums' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
                         >
                           {col.render
-                            ? col.render(row, (currentPage - 1) * pageSize + rowIdx, {
-                                isExpanded,
-                                toggleExpand: () => toggleRowExpand(rowKey),
-                                canExpand
-                              })
+                            ? col.render(row, globalRowIdx, {
+                              isExpanded,
+                              toggleExpand: () => toggleRowExpand(rowKey),
+                              canExpand
+                            })
                             : row[col.accessor]}
                         </td>
                       ))}
-                      {(onEdit || onDelete) && (
+
+                      {showActionsColumn && (
                         <td className="py-3 px-4 text-right shrink-0 whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Print Label(s) Button */}
+                            {enableSerialSelection && (
+                              isBatch ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePrintBatch(row)}
+                                  title="Print all labels for this batch"
+                                  className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                                  aria-label="Print all labels for this batch"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              ) : row.item_code?.trim() ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePrintSingle(row)}
+                                  title="Print serial label"
+                                  className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                                  aria-label="Print serial label"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              ) : null
+                            )}
+
                             {onEdit && (
                               <button
                                 onClick={() => onEdit(row)}
@@ -268,6 +496,7 @@ export const DataTable = ({
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                             )}
+
                             {onDelete && (() => {
                               const canDelete = isRowDeletable ? isRowDeletable(row) : true;
                               if (!canDelete) {
@@ -277,7 +506,7 @@ export const DataTable = ({
                                     type="button"
                                     disabled
                                     aria-disabled="true"
-                                    title="You cannot delete your own account"
+                                    title="You cannot delete this item"
                                     className="p-1.5 rounded text-slate/30 cursor-not-allowed opacity-40"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -305,10 +534,26 @@ export const DataTable = ({
                     {canExpand && isExpanded && (
                       <tr className="bg-surface/20 border-b border-line">
                         <td colSpan={totalColSpan} className="py-3 px-4 sm:px-8">
-                          {renderExpandedRow(row, {
-                            collapse: () => toggleRowExpand(rowKey),
-                            isExpanded: true
-                          })}
+                          {(() => {
+                            const rendered = renderExpandedRow(row, {
+                              collapse: () => toggleRowExpand(rowKey),
+                              isExpanded: true,
+                              selectedSerials: enableSerialSelection ? selectedSerials : null,
+                              onToggleSerial: handleToggleSingleSerial,
+                              onPrintSerial: handleOpenPrintModal,
+                              onToggleAllBatchSerials: handleToggleBatchRow
+                            });
+
+                            if (React.isValidElement(rendered)) {
+                              return React.cloneElement(rendered, {
+                                selectedSerials: enableSerialSelection ? selectedSerials : null,
+                                onToggleSerial: handleToggleSingleSerial,
+                                onPrintSerial: handleOpenPrintModal,
+                                onToggleAllBatchSerials: handleToggleBatchRow
+                              });
+                            }
+                            return rendered;
+                          })()}
                         </td>
                       </tr>
                     )}
@@ -321,7 +566,7 @@ export const DataTable = ({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-3 border-t border-line flex items-center justify-between text-xs text-slate bg-surface/40">
+      <div className="p-3 border-t border-line flex items-center justify-between text-xs text-slate bg-surface/40 no-print">
         <div>
           Page <span className="font-semibold text-ink tabular-nums">{safeCurrentPage}</span> of{' '}
           <span className="font-semibold text-ink tabular-nums">{totalPages}</span>
@@ -344,6 +589,25 @@ export const DataTable = ({
         </div>
       </div>
 
+      {/* Sticky Action Bar */}
+      {enableSerialSelection && (
+        <PrintLabelsActionBar
+          selectedCount={selectedSerials.size}
+          totalFilteredCount={totalFilteredSerialsCount}
+          onPrint={() => handleOpenPrintModal()}
+          onClear={handleClearSelection}
+          onSelectAllFiltered={handleSelectAllFiltered}
+        />
+      )}
+
+      {/* Print Labels Modal */}
+      {enableSerialSelection && (
+        <PrintLabelsModal
+          isOpen={modalPrintItems !== null}
+          onClose={() => setModalPrintItems(null)}
+          itemsToPrint={modalPrintItems || []}
+        />
+      )}
     </div>
   );
 };

@@ -298,13 +298,14 @@ export const InventoryList = () => {
         onAdd={canWrite ? handleOpenAdd : null}
         onEdit={canWrite ? handleOpenEdit : null}
         onDelete={canWrite ? handleDelete : null}
-        addLabel="+ Add Item"
+        addLabel="Add Item"
         renderExpandedRow={(row) => <BatchSerialSubTable item={row} />}
         isRowExpandable={(row) => isBatchItem(row)}
         filterOptions={categories.map(c => ({ value: c.name, label: c.name }))}
         filterKey="category"
         searchPlaceholder="Search by item name, serial no..."
         emptyMessage="No catalog items found matching criteria."
+        enableSerialSelection={true}
       />
 
       {/* Add / Edit Item Modal */}

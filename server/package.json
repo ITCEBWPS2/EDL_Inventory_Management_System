@@ -15,7 +15,9 @@
     "import:backup": "node src/scripts/import-backup.js",
     "cleanup:junk-item": "node src/scripts/remove-junk-item.js",
     "migrate:chair-types": "node src/scripts/migrate-chair-type-names.js",
-    "cleanup:received-dates": "node src/scripts/clear-autofilled-received-dates.js"
+    "cleanup:received-dates": "node src/scripts/clear-autofilled-received-dates.js",
+    "cleanup:verification-record": "node src/scripts/remove-verification-record.js",
+    "fix:swap-remarks-label": "node src/scripts/swap-verification-remarks-label.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

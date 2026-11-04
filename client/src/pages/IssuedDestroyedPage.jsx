@@ -180,7 +180,7 @@ export const IssuedDestroyedPage = () => {
           </table>
         </div>
 
-        {/* Card Footer with "+ Add" button at bottom right */}
+        {/* Card Footer with "Add" button at bottom right */}
         {canWrite && (
           <div className="p-4 border-t border-line bg-surface/30 flex items-center justify-end">
             <button
@@ -190,7 +190,7 @@ export const IssuedDestroyedPage = () => {
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-ink hover:bg-[#193254] text-white rounded-lg text-xs font-semibold shadow-subtle transition-colors"
             >
               <Plus className="w-4 h-4" />
-              <span>+ Add</span>
+              <span>Add</span>
             </button>
           </div>
         )}

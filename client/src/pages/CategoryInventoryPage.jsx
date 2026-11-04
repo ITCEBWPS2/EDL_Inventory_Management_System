@@ -31,6 +31,7 @@ export const CategoryInventoryPage = () => {
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [categoryViewTab, setCategoryViewTab] = useState('subtypes'); // 'subtypes' | 'all'
 
   // Modal State for Add / Edit
   const [modalOpen, setModalOpen] = useState(false);
@@ -592,8 +593,40 @@ export const CategoryInventoryPage = () => {
         </div>
       </div>
 
-      {/* Sub-Types Card Grid View (when category has sub-types and no specific sub-type is selected) */}
-      {availableSubTypes.length > 0 && !activeSubTypeSlug ? (
+      {/* Tab bar when category has sub-types and no specific sub-type URL is active */}
+      {availableSubTypes.length > 0 && !activeSubTypeSlug && (
+        <div className="flex items-center justify-between mb-4 no-print">
+          <div className="inline-flex p-1 bg-surface border border-line rounded-lg text-xs">
+            <button
+              type="button"
+              id="tab-view-subtypes"
+              onClick={() => setCategoryViewTab('subtypes')}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                categoryViewTab === 'subtypes'
+                  ? 'bg-card text-ink shadow-xs border border-line/60 font-semibold'
+                  : 'text-slate hover:text-ink'
+              }`}
+            >
+              Sub-Categories ({availableSubTypes.length})
+            </button>
+            <button
+              type="button"
+              id="tab-view-all-items"
+              onClick={() => setCategoryViewTab('all')}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                categoryViewTab === 'all'
+                  ? 'bg-card text-ink shadow-xs border border-line/60 font-semibold'
+                  : 'text-slate hover:text-ink'
+              }`}
+            >
+              All {categoryDisplayName} Items ({items.length})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Types Card Grid View or Flat Item Table */}
+      {availableSubTypes.length > 0 && !activeSubTypeSlug && categoryViewTab === 'subtypes' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {availableSubTypes.map((st) => {
             const subItems = items.filter(i => itemMatchesSubType(i, st.slug));
@@ -636,8 +669,6 @@ export const CategoryInventoryPage = () => {
       ) : (
         /* Filtered or Flat Item Table */
         <div>
-
-
           <DataTable
             columns={columns}
             data={items}
@@ -645,12 +676,13 @@ export const CategoryInventoryPage = () => {
             onAdd={canWrite ? handleOpenAdd : null}
             onEdit={canWrite ? handleOpenEdit : null}
             onDelete={canWrite ? handleDelete : null}
-            addLabel="+ Add Item"
+            addLabel="Add Item"
             renderExpandedRow={(row) => <BatchSerialSubTable item={row} />}
             isRowExpandable={(row) => isBatchItem(row)}
             searchFieldOptions={searchFieldOptions}
             searchPlaceholder={activeSubType ? `Search within ${activeSubType.name}...` : `Search within ${categoryDisplayName}...`}
             emptyMessage={activeSubType ? `No inventory items found under "${activeSubType.name}".` : `No inventory items found in category "${categoryDisplayName}".`}
+            enableSerialSelection={true}
           />
         </div>
       )}

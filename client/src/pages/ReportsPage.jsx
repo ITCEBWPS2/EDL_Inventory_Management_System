@@ -116,7 +116,7 @@ export const ReportsPage = () => {
         <div>
           <h1 className="text-xl font-semibold text-ink tracking-tight">Executive Inventory Reports</h1>
           <p className="text-xs text-slate mt-0.5">
-            Certified stock levels, transaction audit logs, and Board of Survey findings for{' '}
+
             <span className="font-semibold text-ink">{selectedUnit ? selectedUnit.unit_name : 'All Units'}</span>
           </p>
         </div>
@@ -229,24 +229,7 @@ export const ReportsPage = () => {
       {reportData?.summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {activeTab === 'inventory' && (
-            <>
-              <div className="bg-card p-3 rounded-lg border border-line">
-                <div className="text-[11px] text-slate">Total Items</div>
-                <div className="text-xl font-bold text-ink tabular-nums">{reportData.summary.total_items}</div>
-              </div>
-              <div className="bg-card p-3 rounded-lg border border-line">
-                <div className="text-[11px] text-slate">Total Units In Stock</div>
-                <div className="text-xl font-bold text-ink tabular-nums">{formatNumber(reportData.summary.total_quantity)}</div>
-              </div>
-              <div className="bg-card p-3 rounded-lg border border-line">
-                <div className="text-[11px] text-slate">Low Stock Warnings</div>
-                <div className="text-xl font-bold text-[#D6922C] tabular-nums">{reportData.summary.low_stock_count}</div>
-              </div>
-              <div className="bg-card p-3 rounded-lg border border-line">
-                <div className="text-[11px] text-slate">Out of Stock SKUs</div>
-                <div className="text-xl font-bold text-[#B4483A] tabular-nums">{reportData.summary.out_of_stock_count}</div>
-              </div>
-            </>
+            <></>
           )}
 
           {activeTab === 'transactions' && (
@@ -304,7 +287,7 @@ export const ReportsPage = () => {
                 <th className="py-3 px-3 text-right">Received (Σ In)</th>
                 <th className="py-3 px-3 text-right">Expended (Σ Out)</th>
                 <th className="py-3 px-3 text-right">Current Balance</th>
-                <th className="py-3 px-3 text-center">Status</th>
+                
               </tr>
             )}
 
@@ -359,7 +342,7 @@ export const ReportsPage = () => {
                       <td className="py-2.5 px-3 text-right font-mono text-[#2F7A5C]">+{row.total_received}</td>
                       <td className="py-2.5 px-3 text-right font-mono text-[#B4483A]">-{row.total_expended}</td>
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-ink">{formatNumber(row.remaining_qty)}</td>
-                      <td className="py-2.5 px-3 text-center"><StatusBadge status={row.stock_status} /></td>
+
                     </>
                   )}
 

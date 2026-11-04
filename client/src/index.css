@@ -63,11 +63,17 @@ body {
 }
 
 /* Print styles for audit reports and verifications */
+#print-serial-labels-portal {
+  display: none;
+}
+
 @media print {
   @page {
     size: landscape;
     margin: 10mm;
   }
+  body.printing-serial-labels #root,
+  body.printing-serial-labels .no-print,
   .no-print,
   aside,
   header,
@@ -77,6 +83,9 @@ body {
   #btn-back-verification,
   button:not(.print-include) {
     display: none !important;
+  }
+  body.printing-serial-labels #print-serial-labels-portal {
+    display: block !important;
   }
   .print-only {
     display: block !important;

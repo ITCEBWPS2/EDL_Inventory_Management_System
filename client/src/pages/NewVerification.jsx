@@ -741,8 +741,8 @@ export const NewVerification = () => {
           issued_destroyed: row.issued_destroyed,
           issued_destroyed_qty: issuedDestroyedQtyToSave,
           issued_destroyed_id: row.issued_destroyed_id,
-          label_no: row.label_no,
-          remarks: row.remarks,
+          label_no: (row.label_no || '').trim(),
+          remarks: (row.remarks || '').trim(),
           status: row.status
         },
         headerData: {
@@ -850,8 +850,8 @@ export const NewVerification = () => {
           issued_destroyed: row.issued_destroyed,
           issued_destroyed_qty: (row.issued_destroyed === 'Issued' || row.issued_destroyed === 'Destroyed') ? Number(row.issued_destroyed_qty || 1) : null,
           issued_destroyed_id: row.issued_destroyed_id,
-          label_no: row.label_no,
-          remarks: row.remarks,
+          label_no: (row.label_no || '').trim(),
+          remarks: (row.remarks || '').trim(),
           status: row.status
         })),
         headerData: {
@@ -1027,8 +1027,8 @@ export const NewVerification = () => {
             issued_destroyed: item.issued_destroyed && item.issued_destroyed !== '—' ? item.issued_destroyed : '',
             issued_destroyed_qty: (item.issued_destroyed === 'Issued' || item.issued_destroyed === 'Destroyed') ? Number(item.issued_destroyed_qty || 1) : null,
             issued_destroyed_id: item.issued_destroyed_id || null,
-            label_no: item.label_no || '',
-            remarks: item.remarks || '',
+            label_no: (item.label_no || '').trim(),
+            remarks: (item.remarks || '').trim(),
             status,
             in_inventory: true
           };
@@ -1644,13 +1644,27 @@ export const NewVerification = () => {
                         </td>
 
                         {/* 10. Label No */}
-                        <td className="py-2.5 px-3 font-mono text-xs text-ink align-top min-w-[95px] whitespace-nowrap">
-                          {row.label_no || '—'}
+                        <td className={`py-2.5 px-3 align-top ${row.label_no && row.label_no.trim().length > 24 ? 'text-left min-w-[110px] max-w-[220px] font-sans text-xs text-ink whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word] leading-snug line-clamp-3 print:line-clamp-none' : 'text-center min-w-[95px] font-mono text-xs text-ink whitespace-nowrap'}`}>
+                          {row.label_no && row.label_no.trim() ? (
+                            row.label_no.trim().length > 24 ? (
+                              <span title={row.label_no.trim()}>{row.label_no.trim()}</span>
+                            ) : (
+                              <span className="bg-surface px-1.5 py-0.5 rounded border border-line text-ink font-mono inline-block">
+                                {row.label_no.trim()}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-slate">—</span>
+                          )}
                         </td>
 
                         {/* 11. Remarks */}
-                        <td className="py-2.5 px-4 text-slate text-xs align-top min-w-[140px] leading-snug">
-                          {row.remarks || '—'}
+                        <td className="py-2.5 px-4 text-slate text-xs align-top min-w-[140px] max-w-[320px] leading-snug whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word] font-sans line-clamp-3 print:line-clamp-none">
+                          {row.remarks && row.remarks.trim() ? (
+                            <span title={row.remarks.trim()}>{row.remarks.trim()}</span>
+                          ) : (
+                            <span className="text-slate">—</span>
+                          )}
                         </td>
 
                         {/* 12. Status */}

@@ -1,4 +1,25 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Resolves the backend API URL dynamically so that both localhost and 127.0.0.1 work seamlessly
+const resolveApiUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl) {
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      const hostname = window.location.hostname;
+      if (hostname === '127.0.0.1' && envUrl.includes('localhost')) {
+        return envUrl.replace('localhost', '127.0.0.1');
+      }
+      if (hostname === 'localhost' && envUrl.includes('127.0.0.1')) {
+        return envUrl.replace('127.0.0.1', 'localhost');
+      }
+    }
+    return envUrl;
+  }
+  if (typeof window !== 'undefined' && window.location?.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:5000/api';
+  }
+  return 'http://localhost:5000/api';
+};
+
+const API_URL = resolveApiUrl();
 
 class ApiError extends Error {
   constructor(message, status, data) {

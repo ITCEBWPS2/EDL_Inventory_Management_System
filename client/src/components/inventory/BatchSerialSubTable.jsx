@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Eye, FileText, Check, Copy, Printer, X, Tag, ShieldCheck } from 'lucide-react';
-import { toast } from 'react-hot-toast';
+import { IndeterminateCheckbox } from '../common/IndeterminateCheckbox';
 
 export function getBatchSerialList(item) {
-  const qty = Math.max(1, parseInt(item?.quantity, 10) || 1);
-  if (Array.isArray(item?.serial_numbers) && item.serial_numbers.length === qty) {
+  if (Array.isArray(item?.serial_numbers) && item.serial_numbers.length > 0) {
     return item.serial_numbers;
   }
+  const qty = Math.max(1, parseInt(item?.quantity, 10) || 1);
   const baseCode = (item?.item_code || 'ITM-001').trim();
   if (qty <= 1) return [baseCode];
 
@@ -30,7 +30,13 @@ export function getBatchSerialList(item) {
   return list;
 }
 
-export const BatchSerialSubTable = ({ item }) => {
+export const BatchSerialSubTable = ({
+  item,
+  selectedSerials = null,
+  onToggleSerial = null,
+  onPrintSerial = null,
+  onToggleAllBatchSerials = null
+}) => {
   const [activeModal, setActiveModal] = useState(null); // { type: 'view' | 'document', serial: string, index: number }
   const [copiedSerial, setCopiedSerial] = useState(null);
 
@@ -39,10 +45,24 @@ export const BatchSerialSubTable = ({ item }) => {
   const handleCopy = (serial) => {
     navigator.clipboard.writeText(serial);
     setCopiedSerial(serial);
-    toast.success('Serial No. copied to clipboard');
     setTimeout(() => setCopiedSerial(null), 2000);
   };
 
+  const handleTriggerPrint = (serial) => {
+    if (!onPrintSerial) return;
+    const targetSerial = typeof serial === 'string' ? serial : serial?.serial;
+    onPrintSerial([{
+      serial: targetSerial,
+      itemName: item?.sub_classification || item?.item_name || '',
+      itemId: item?.id
+    }]);
+  };
+
+  const selectedCount = selectedSerials
+    ? serials.filter(s => selectedSerials.has(s)).length
+    : 0;
+  const isAllSelected = selectedSerials && serials.length > 0 && selectedCount === serials.length;
+  const isSomeSelected = selectedSerials && selectedCount > 0 && selectedCount < serials.length;
 
   return (
     <div className="py-2.5 px-3 bg-surface/60 rounded-lg border border-line/70">
@@ -54,18 +74,57 @@ export const BatchSerialSubTable = ({ item }) => {
           <span className="text-xs font-semibold text-ink">
             Batch Units &amp; Individual Serial Numbers
           </span>
+          {selectedSerials && selectedCount > 0 && (
+            <span className="text-[11px] text-signal font-medium ml-2">
+              ({selectedCount} of {serials.length} selected for printing)
+            </span>
+          )}
         </div>
+
+        {onPrintSerial && (
+          <button
+            type="button"
+            onClick={() => {
+              const itemsToPrint = serials.map(s => ({
+                serial: s,
+                itemName: item.sub_classification || item.item_name || '',
+                itemId: item.id
+              }));
+              onPrintSerial(itemsToPrint);
+            }}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-card hover:bg-surface border border-line text-xs font-medium text-ink transition-colors shadow-xs"
+            title="Print labels for all serial numbers in this batch"
+          >
+            <Printer className="w-3.5 h-3.5 text-signal" />
+            <span>Print All {serials.length} Labels</span>
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded border border-line bg-card shadow-sm">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="border-b border-line bg-surface/90 text-[11px] font-semibold text-slate uppercase tracking-wider">
+              {selectedSerials && (
+                <th className="py-2 px-3 w-10 text-center">
+                  <IndeterminateCheckbox
+                    checked={isAllSelected}
+                    indeterminate={isSomeSelected}
+                    onChange={() => {
+                      if (onToggleAllBatchSerials) {
+                        onToggleAllBatchSerials(item);
+                      }
+                    }}
+                    title={isAllSelected ? 'Deselect all batch serials' : 'Select all batch serials'}
+                    aria-label="Select all batch serials"
+                  />
+                </th>
+              )}
               <th className="py-2 px-3 w-14">No.</th>
               <th className="py-2 px-3">Serial No.</th>
               <th className="py-2 px-3">Manufacturer S/N</th>
               <th className="py-2 px-3 text-right w-24">Quantity</th>
-              <th className="py-2 px-3 text-right w-28">Actions</th>
+              <th className="py-2 px-3 text-right w-32">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line/60">
@@ -78,8 +137,28 @@ export const BatchSerialSubTable = ({ item }) => {
                 mfgSerial = (item.serial_number || '').trim();
               }
 
+              const isChecked = selectedSerials ? selectedSerials.has(serial) : false;
+
               return (
-                <tr key={serial || idx} className="hover:bg-surface/50 transition-colors">
+                <tr
+                  key={serial || idx}
+                  className={`hover:bg-surface/50 transition-colors ${
+                    isChecked ? 'bg-signal/5' : ''
+                  }`}
+                >
+                  {selectedSerials && (
+                    <td className="py-2 px-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (onToggleSerial) onToggleSerial(serial);
+                        }}
+                        aria-label={`Select serial ${serial}`}
+                        className="w-4 h-4 rounded border-line text-signal accent-signal focus:ring-2 focus:ring-signal/30 cursor-pointer"
+                      />
+                    </td>
+                  )}
                   <td className="py-2 px-3 font-mono text-slate text-xs font-medium">
                     {idx + 1}
                   </td>
@@ -130,6 +209,16 @@ export const BatchSerialSubTable = ({ item }) => {
                   </td>
                   <td className="py-2 px-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {onPrintSerial && (
+                        <button
+                          type="button"
+                          onClick={() => handleTriggerPrint(serial)}
+                          title="Print label for this serial"
+                          className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setActiveModal({ type: 'view', serial, mfgSerial, index: idx + 1 })}
@@ -157,7 +246,7 @@ export const BatchSerialSubTable = ({ item }) => {
 
       {/* Unit Detail Modal */}
       {activeModal && activeModal.type === 'view' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs animate-in fade-in duration-150 no-print">
           <div className="bg-card w-full max-w-md rounded-xl border border-line shadow-dialog overflow-hidden">
             <div className="p-4 border-b border-line flex items-center justify-between bg-surface/50">
               <div className="flex items-center gap-2">
@@ -249,14 +338,28 @@ export const BatchSerialSubTable = ({ item }) => {
             </div>
 
             <div className="p-4 border-t border-line bg-surface/40 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => handleCopy(activeModal.serial)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy Serial No.</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(activeModal.serial)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Serial</span>
+                </button>
+                {onPrintSerial && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleTriggerPrint(activeModal.serial);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-signal" />
+                    <span>Print Label</span>
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setActiveModal(null)}
@@ -271,7 +374,7 @@ export const BatchSerialSubTable = ({ item }) => {
 
       {/* Asset Tag / Document Modal */}
       {activeModal && activeModal.type === 'document' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs animate-in fade-in duration-150 no-print">
           <div className="bg-card w-full max-w-md rounded-xl border border-line shadow-dialog overflow-hidden">
             <div className="p-4 border-b border-line flex items-center justify-between bg-surface/50">
               <div className="flex items-center gap-2">
@@ -327,16 +430,30 @@ export const BatchSerialSubTable = ({ item }) => {
             </div>
 
             <div className="p-4 border-t border-line bg-surface/40 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  window.print();
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Tag</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.print();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Slip</span>
+                </button>
+                {onPrintSerial && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleTriggerPrint(activeModal.serial);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
+                  >
+                    <Tag className="w-3.5 h-3.5 text-signal" />
+                    <span>Print Label</span>
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setActiveModal(null)}

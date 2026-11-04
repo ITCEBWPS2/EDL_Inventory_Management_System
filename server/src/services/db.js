@@ -1021,25 +1021,52 @@ const db = {
     });
   },
 
-  async getVerificationHistoryItems(unitIds = null, year = null) {
-    let verifs = await Verification.find({ status: 'confirmed' }).lean();
-    const [allUnits, allItems] = await Promise.all([
+  async getVerificationHistoryItems(unitIds = null, year = null, includeNotCounted = false) {
+    let verifs = await Verification.find({ status: 'confirmed' })
+      .sort({ date: -1, created_at: -1 })
+      .lean();
+
+    const [allUnits, allItems, allInventory] = await Promise.all([
       Unit.find({}).lean(),
-      VerificationItem.find({}).lean()
+      VerificationItem.find({}).lean(),
+      InventoryItem.find({}).lean()
     ]);
     const unitsMap = new Map(allUnits.map(u => [u.id, u]));
+    const invMap = new Map(allInventory.map(i => [i.id, i]));
 
     if (unitIds && unitIds.length > 0) {
       verifs = verifs.filter(v => unitIds.includes(v.unit_id));
     }
-    if (year && year !== 'all' && year !== 'All Years') {
+    if (year && year !== 'all' && year !== 'All Years' && year !== 'All') {
       verifs = verifs.filter(v => Number(v.year) === Number(year));
     }
 
     const rows = [];
     for (const v of verifs) {
       const unit = unitsMap.get(v.unit_id) || {};
-      const vItems = allItems.filter(vi => vi.verification_id === v.id);
+      let vItems = allItems.filter(vi => vi.verification_id === v.id);
+
+      // Sort within verification in same order as New Verification: category, sub_type, item_name, serial
+      vItems.sort((a, b) => {
+        const invA = invMap.get(a.item_id) || {};
+        const invB = invMap.get(b.item_id) || {};
+
+        const catA = (a.category || invA.category || '').toLowerCase();
+        const catB = (b.category || invB.category || '').toLowerCase();
+        if (catA !== catB) return catA.localeCompare(catB);
+
+        const subA = (invA.sub_type || '').toLowerCase();
+        const subB = (invB.sub_type || '').toLowerCase();
+        if (subA !== subB) return subA.localeCompare(subB);
+
+        const nameA = (a.item_name || '').toLowerCase();
+        const nameB = (b.item_name || '').toLowerCase();
+        if (nameA !== nameB) return nameA.localeCompare(nameB);
+
+        const codeA = (a.item_code || (Array.isArray(a.serial_numbers) ? a.serial_numbers[0] : '') || '');
+        const codeB = (b.item_code || (Array.isArray(b.serial_numbers) ? b.serial_numbers[0] : '') || '');
+        return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+      });
 
       const vNames = [v.verifier_1, v.verifier_2, v.verifier_3].filter(Boolean);
       const verifiersDisplay = vNames.length > 0
@@ -1048,11 +1075,35 @@ const db = {
 
       for (const item of vItems) {
         const sysQty = Number(item.system_qty || 0);
-        const physQty = item.physical_qty !== null && item.physical_qty !== undefined && item.physical_qty !== ''
-          ? Number(item.physical_qty)
-          : sysQty;
+        const hasPhys = item.physical_qty !== null && item.physical_qty !== undefined && item.physical_qty !== '' && !isNaN(Number(item.physical_qty));
+        const physQty = hasPhys ? Number(item.physical_qty) : null;
         const physAvail = physQty;
-        const physNotAvail = Math.max(0, sysQty - physQty);
+        const physNotAvail = hasPhys ? Math.max(0, sysQty - physQty) : null;
+
+        const hasCondition = Boolean(
+          item.condition &&
+          item.condition !== '—' &&
+          (item.condition !== 'Good' || hasPhys || (item.status && item.status !== 'Not Counted' && item.status !== 'Not counted'))
+        );
+        const rawDisp = item.issued_destroyed || item.disposition || '';
+        const hasDisp = Boolean(
+          rawDisp &&
+          rawDisp !== '—' &&
+          rawDisp !== 'N/A' &&
+          String(rawDisp).trim() !== ''
+        );
+        const trimmedLabel = (item.label_no !== null && item.label_no !== undefined) ? String(item.label_no).trim() : '';
+        const hasLabel = Boolean(trimmedLabel && trimmedLabel !== '—');
+        const trimmedRemarks = (item.remarks || item.special_remarks || '').trim();
+        const hasRemarks = Boolean(trimmedRemarks && trimmedRemarks !== '—');
+        const isCountedStatus = item.status && item.status !== 'Not Counted' && item.status !== 'Not counted';
+
+        const hasEnteredData = hasPhys || hasCondition || hasDisp || hasLabel || hasRemarks || isCountedStatus;
+
+        // Skip untouched rows unless explicitly requested
+        if (!hasEnteredData && !includeNotCounted) {
+          continue;
+        }
 
         const itemSerials = (Array.isArray(item.serial_numbers) && item.serial_numbers.length > 0)
           ? item.serial_numbers
@@ -1060,6 +1111,9 @@ const db = {
         const itemMfgSerials = (Array.isArray(item.manufacturer_serial_numbers) && item.manufacturer_serial_numbers.length > 0)
           ? item.manufacturer_serial_numbers
           : (item.manufacturer_sn ? [item.manufacturer_sn] : []);
+
+        const isCounted = hasEnteredData;
+        const statusDisplay = !isCounted ? 'Not counted' : (item.status || (hasPhys ? (physQty === sysQty ? 'Matched' : (physQty < sysQty ? 'Shortage' : 'Excess')) : 'Counted'));
 
         rows.push({
           id: item.id,
@@ -1081,13 +1135,16 @@ const db = {
           system_qty: sysQty,
           physical_available: physAvail,
           physical_not_available: physNotAvail,
-          condition: item.condition || 'Good',
-          disposition: item.issued_destroyed || item.disposition || '—',
-          issued_destroyed: item.issued_destroyed || item.disposition || '—',
+          difference: hasPhys ? physQty - sysQty : 0,
+          condition: (item.condition && item.condition !== '—') ? item.condition : (hasEnteredData ? 'Good' : '—'),
+          disposition: hasDisp ? rawDisp : '—',
+          issued_destroyed: hasDisp ? rawDisp : '—',
           issued_destroyed_id: item.issued_destroyed_id || null,
           issued_destroyed_qty: item.issued_destroyed_qty || null,
-          remarks: item.remarks || item.special_remarks || '—',
-          label_no: item.label_no || '—'
+          remarks: hasRemarks ? trimmedRemarks : '—',
+          label_no: hasLabel ? trimmedLabel : '—',
+          is_counted: isCounted,
+          status: statusDisplay
         });
       }
     }
@@ -1213,8 +1270,8 @@ const db = {
           physical_qty: physQty,
           difference: diff,
           condition: item.condition && item.condition !== '—' ? item.condition : 'Good',
-          label_no: item.label_no || '',
-          remarks: item.remarks || '',
+          label_no: (item.label_no !== undefined && item.label_no !== null) ? String(item.label_no).trim() : '',
+          remarks: item.remarks ? String(item.remarks).trim() : '',
           disposition: (item.issued_destroyed && item.issued_destroyed !== '—' && item.issued_destroyed !== 'N/A') ? item.issued_destroyed : (item.disposition || ''),
           issued_destroyed: (item.issued_destroyed && item.issued_destroyed !== '—') ? item.issued_destroyed : (item.disposition || ''),
           issued_destroyed_id: item.issued_destroyed_id || null,
@@ -1274,8 +1331,8 @@ const db = {
           physical_qty: physQty,
           difference: physQty - sysQty,
           condition: item.condition || 'Good',
-          label_no: item.label_no || '',
-          remarks: item.remarks || '',
+          label_no: (item.label_no !== undefined && item.label_no !== null) ? String(item.label_no).trim() : '',
+          remarks: item.remarks ? String(item.remarks).trim() : '',
           disposition: (item.issued_destroyed && item.issued_destroyed !== '—' && item.issued_destroyed !== 'N/A') ? item.issued_destroyed : (item.disposition || ''),
           issued_destroyed: (item.issued_destroyed && item.issued_destroyed !== '—') ? item.issued_destroyed : (item.disposition || ''),
           issued_destroyed_id: item.issued_destroyed_id || null,
@@ -1410,8 +1467,6 @@ const db = {
     }
 
     const condition = (rowData.condition && rowData.condition !== '—') ? String(rowData.condition).trim() : 'Good';
-    const label_no = (rowData.label_no || '').trim();
-    const remarks = (rowData.remarks || '').trim();
     const rawIssuedDestroyed = rowData.issued_destroyed;
     const issued_destroyed = (rawIssuedDestroyed && rawIssuedDestroyed !== '—') ? String(rawIssuedDestroyed).trim() : '';
     const issued_destroyed_id = rowData.issued_destroyed_id || null;
@@ -1431,6 +1486,13 @@ const db = {
 
     // 4. Upsert item into VerificationItem for this draft
     let itemDoc = await VerificationItem.findOne({ verification_id: draft.id, item_id });
+    const label_no = rowData.label_no !== undefined
+      ? String(rowData.label_no || '').trim()
+      : (itemDoc ? (itemDoc.label_no || '') : '');
+    const remarks = rowData.remarks !== undefined
+      ? String(rowData.remarks || '').trim()
+      : (itemDoc ? (itemDoc.remarks || '') : '');
+
     if (itemDoc) {
       itemDoc.system_qty = system_qty;
       itemDoc.physical_qty = phys;
@@ -1836,23 +1898,38 @@ const db = {
     // 3. Find all existing issued/destroyed items for this unit
     const recordedEntries = await IssuedDestroyedItem.find({ unit_id: unitId }).lean();
 
-    const recordedByItem = new Map();
-    const recordedSerialsByItem = new Map();
+    // Track recorded quantities separately for each disposition (Issued / Destroyed)
+    const recordedByItemDisposition = new Map(); // Map<itemId, {Issued: number, Destroyed: number}>
+    const recordedSerialsByItemDisposition = new Map(); // Map<itemId, {issued:Set, destroyed:Set}>
 
     for (const rec of recordedEntries) {
       const itId = rec.item_id;
+      const disp = (rec.disposition || '').toLowerCase(); // assume stored disposition field
       const qty = Number(rec.quantity || 0);
-      recordedByItem.set(itId, (recordedByItem.get(itId) || 0) + qty);
+      // Initialize quantity map entry if needed
+      if (!recordedByItemDisposition.has(itId)) {
+        recordedByItemDisposition.set(itId, { issued: 0, destroyed: 0 });
+      }
+      const dispEntry = recordedByItemDisposition.get(itId);
+      if (disp === 'issued') {
+        dispEntry.issued += qty;
+      } else if (disp === 'destroyed') {
+        dispEntry.destroyed += qty;
+      }
 
-      if (!recordedSerialsByItem.has(itId)) {
-        recordedSerialsByItem.set(itId, new Set());
+      // Initialize serials map entry if needed
+      if (!recordedSerialsByItemDisposition.has(itId)) {
+        recordedSerialsByItemDisposition.set(itId, { issued: new Set(), destroyed: new Set() });
       }
-      const sSet = recordedSerialsByItem.get(itId);
-      if (Array.isArray(rec.serial_numbers)) {
-        rec.serial_numbers.forEach(s => s && sSet.add(s));
-      }
-      if (rec.serial_number) {
-        sSet.add(rec.serial_number);
+      const sDispSet = recordedSerialsByItemDisposition.get(itId);
+      const targetSet = disp === 'issued' ? sDispSet.issued : disp === 'destroyed' ? sDispSet.destroyed : null;
+      if (targetSet) {
+        if (Array.isArray(rec.serial_numbers)) {
+          rec.serial_numbers.forEach(s => s && targetSet.add(s));
+        }
+        if (rec.serial_number) {
+          targetSet.add(rec.serial_number);
+        }
       }
     }
 
@@ -1871,7 +1948,9 @@ const db = {
 
       const invItem = invMap.get(itemId);
       const markedQty = Number(vItem.issued_destroyed_qty || 1);
-      const alreadyRecorded = recordedByItem.get(itemId) || 0;
+      const dispKey = (vItem.issued_destroyed || '').toLowerCase();
+      const dispMap = recordedByItemDisposition.get(itemId) || {issued:0,destroyed:0};
+      const alreadyRecorded = dispKey === 'issued' ? dispMap.issued : dispKey === 'destroyed' ? dispMap.destroyed : 0;
       const remainingQty = Math.max(0, markedQty - alreadyRecorded);
 
       if (remainingQty <= 0) {
@@ -1884,7 +1963,9 @@ const db = {
         ? vItem.serial_numbers
         : (invItem?.serial_numbers || (invItem?.item_code ? [invItem.item_code] : []));
 
-      const recordedSet = recordedSerialsByItem.get(itemId) || new Set();
+      const dispKey2 = (vItem.issued_destroyed || '').toLowerCase();
+      const serialsMap = recordedSerialsByItemDisposition.get(itemId) || { issued: new Set(), destroyed: new Set() };
+      const recordedSet = dispKey2 === 'issued' ? serialsMap.issued : dispKey2 === 'destroyed' ? serialsMap.destroyed : new Set();
 
       const serialsWithFlags = itemSerials.map(sn => ({
         serial_number: sn,
