@@ -1,0 +1,2 @@
+# EDL_Inventory_Management_System
+Electricity Distribution Lanka IMS
