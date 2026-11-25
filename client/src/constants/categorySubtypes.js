@@ -2,6 +2,8 @@
  * Configuration for category sub-types / taxonomies
  * Designed to be modular and reusable across all 6 inventory categories.
  */
+import { registerCustomItemTypeCode } from '../utils/serialNumberGenerator.js';
+
 export const CATEGORY_SUBTYPES = {
   furniture: [
     { name: 'Chairs', slug: 'chairs' },
@@ -40,19 +42,149 @@ export const CATEGORY_SUBTYPES = {
   ]
 };
 
+const customSubtypes = {};
+
+export const registerCustomSubtypes = (typesArray = []) => {
+  if (!Array.isArray(typesArray)) return;
+  typesArray.forEach(t => {
+    if (!t || !t.name || !t.slug) return;
+    const catSlug = String(t.category || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (!catSlug) return;
+    if (!customSubtypes[catSlug]) {
+      customSubtypes[catSlug] = [];
+    }
+    const exists = customSubtypes[catSlug].some(
+      s => s.slug === t.slug || s.name.toLowerCase() === t.name.toLowerCase()
+    );
+    if (!exists) {
+      customSubtypes[catSlug].push({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        category: t.category,
+        is_custom: true
+      });
+    }
+  });
+};
+
+export const syncCategoryCustomSubtypes = (categoryIdentifier, typesArray = []) => {
+  if (!categoryIdentifier) return;
+  const catSlug = String(categoryIdentifier).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  customSubtypes[catSlug] = [];
+  registerCustomSubtypes(typesArray);
+};
+
+export const unregisterCustomSubtype = (identifier) => {
+  if (!identifier) return;
+  Object.keys(customSubtypes).forEach(cat => {
+    customSubtypes[cat] = (customSubtypes[cat] || []).filter(
+      s => s.id !== identifier && s.slug !== identifier
+    );
+  });
+};
+
+// --- Custom Item Types within Subcategories (e.g. "Bench" under "chairs") ---
+const customItemTypesBySubcategory = {};
+
+export const registerCustomItemTypes = (subCatSlug, typesArray = []) => {
+  if (!subCatSlug || !Array.isArray(typesArray)) return;
+  const slug = String(subCatSlug).toLowerCase().trim();
+  if (!customItemTypesBySubcategory[slug]) {
+    customItemTypesBySubcategory[slug] = [];
+  }
+  typesArray.forEach(t => {
+    if (!t || !t.name) return;
+    const trimmedName = String(t.name).trim();
+    const exists = customItemTypesBySubcategory[slug].some(
+      x => x.name.toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (!exists) {
+      customItemTypesBySubcategory[slug].push({
+        ...t,
+        name: trimmedName,
+        subcategory_slug: slug
+      });
+    }
+    if (t.code) {
+      try {
+        registerCustomItemTypeCode(slug, trimmedName, t.code);
+      } catch (e) {
+        // ignore registration error
+      }
+    }
+  });
+};
+
+export const syncCustomItemTypes = (subCatSlug, typesArray = []) => {
+  if (!subCatSlug) return;
+  const slug = String(subCatSlug).toLowerCase().trim();
+  customItemTypesBySubcategory[slug] = [];
+  registerCustomItemTypes(slug, typesArray);
+};
+
+export const unregisterCustomItemType = (subCatSlug, typeIdOrName) => {
+  if (!subCatSlug || !typeIdOrName) return;
+  const slug = String(subCatSlug).toLowerCase().trim();
+  if (!customItemTypesBySubcategory[slug]) return;
+  const target = String(typeIdOrName).toLowerCase().trim();
+  customItemTypesBySubcategory[slug] = customItemTypesBySubcategory[slug].filter(
+    t => t.id !== typeIdOrName && t.name.toLowerCase() !== target
+  );
+};
+
+export const getCustomItemTypes = (subCatSlug) => {
+  if (!subCatSlug) return [];
+  const slug = String(subCatSlug).toLowerCase().trim();
+  return customItemTypesBySubcategory[slug] || [];
+};
+
+export const getSubTypeOptions = (subCatSlug) => {
+  if (!subCatSlug) return [];
+  const slug = String(subCatSlug).toLowerCase().trim();
+  const meta = SUBTYPE_METADATA[slug];
+  const builtIn = meta?.subTypeOptions ? [...meta.subTypeOptions] : [];
+  const customList = customItemTypesBySubcategory[slug] || [];
+
+  // Sort custom types alphabetically
+  const sortedCustom = [...customList].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  );
+
+  const result = [...builtIn];
+  const seen = new Set(builtIn.map(b => b.toLowerCase().trim()));
+  sortedCustom.forEach(c => {
+    const trimmed = String(c.name || '').trim();
+    if (trimmed && !seen.has(trimmed.toLowerCase())) {
+      seen.add(trimmed.toLowerCase());
+      result.push(trimmed);
+    }
+  });
+  return result;
+};
+
 /**
  * Helper to safely resolve configured sub-categories for any category slug or name
  */
 export const getCategorySubtypes = (categoryIdentifier) => {
   if (!categoryIdentifier) return [];
   const s = String(categoryIdentifier).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  if (CATEGORY_SUBTYPES[s]) return CATEGORY_SUBTYPES[s];
-  if (s.includes('tool')) return CATEGORY_SUBTYPES['tools-equipment'] || [];
-  if (s.includes('furniture')) return CATEGORY_SUBTYPES['furniture'] || [];
-  if (s.includes('it') || s.includes('computing')) return CATEGORY_SUBTYPES['it-computing-equipment'] || [];
-  if (s.includes('network') || s.includes('communication')) return CATEGORY_SUBTYPES['network-communication-equipment'] || [];
-  if (s.includes('audio') || s.includes('visual') || s.includes('presentation')) return CATEGORY_SUBTYPES['audio-visual-presentation-equipment'] || [];
-  return [];
+  let baseList = [];
+  if (CATEGORY_SUBTYPES[s]) baseList = [...CATEGORY_SUBTYPES[s]];
+  else if (s.includes('tool')) baseList = [...(CATEGORY_SUBTYPES['tools-equipment'] || [])];
+  else if (s.includes('furniture')) baseList = [...(CATEGORY_SUBTYPES['furniture'] || [])];
+  else if (s.includes('it') || s.includes('computing')) baseList = [...(CATEGORY_SUBTYPES['it-computing-equipment'] || [])];
+  else if (s.includes('network') || s.includes('communication')) baseList = [...(CATEGORY_SUBTYPES['network-communication-equipment'] || [])];
+  else if (s.includes('audio') || s.includes('visual') || s.includes('presentation')) baseList = [...(CATEGORY_SUBTYPES['audio-visual-presentation-equipment'] || [])];
+
+  const customList = customSubtypes[s] || [];
+  const combined = [...baseList];
+  customList.forEach(ct => {
+    if (!combined.some(b => b.slug === ct.slug || b.name.toLowerCase() === ct.name.toLowerCase())) {
+      combined.push(ct);
+    }
+  });
+  return combined;
 };
 
 /**
@@ -71,9 +203,12 @@ export const buildCategoryItemUnion = (categoryIdentifier, inventoryList = [], c
 
   // 1. Add all configured item types grouped by sub-category in order
   subCats.forEach(sub => {
+    const options = getSubTypeOptions(sub.slug);
     const meta = SUBTYPE_METADATA[sub.slug];
-    const options = meta?.subTypeOptions || [];
-    options.forEach(optName => {
+    const finalOptions = (options && options.length > 0)
+      ? options
+      : ((meta?.subTypeOptions && meta.subTypeOptions.length > 0) ? meta.subTypeOptions : [sub.name]);
+    finalOptions.forEach(optName => {
       const trimmedOpt = String(optName || '').trim();
       if (!trimmedOpt) return;
       const norm = trimmedOpt.toLowerCase();
@@ -666,6 +801,20 @@ export const itemMatchesSubType = (item, subTypeSlug) => {
     }
   }
 
+  // 1b. Check subCategory or sub_classification (for custom types or legacy records)
+  if (item.subCategory) {
+    const itemSc = item.subCategory.toLowerCase().trim();
+    if (itemSc === target || itemSc.replace(/[^a-z0-9]+/g, '-') === target) {
+      return true;
+    }
+  }
+  if (item.sub_classification) {
+    const itemSc = item.sub_classification.toLowerCase().trim();
+    if (itemSc === target || itemSc.replace(/[^a-z0-9]+/g, '-') === target) {
+      return true;
+    }
+  }
+
   const name = (item.item_name || '').toLowerCase();
   const code = (item.item_code || '').toLowerCase();
 
@@ -801,6 +950,15 @@ export const itemMatchesSubType = (item, subTypeSlug) => {
   }
   if (target === 'measuring-tools') {
     return name.includes('multimeter') || name.includes('tester') || name.includes('crimping') || code.includes('-tool-') || code.startsWith('tool-') || code.startsWith('tls-');
+  }
+
+  // Generic match by slugified name or item code segment for custom types
+  const slugClean = target.replace(/[^a-z0-9]+/g, '-');
+  if (name && (name.replace(/[^a-z0-9]+/g, '-') === slugClean || name === target)) {
+    return true;
+  }
+  if (code && (code.includes(`-${slugClean}-`) || code.includes(`/${slugClean}/`) || code.endsWith(`-${slugClean}`))) {
+    return true;
   }
 
   return false;

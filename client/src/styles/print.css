@@ -1,0 +1,177 @@
+/**
+ * Shared Print Stylesheet for EDL IMS Reports
+ * Provides A4 paper sizing, exact color reproduction, margin box pagination,
+ * repeating table headers, and clean typography.
+ */
+
+@media print {
+  /* Page Setup & Margins (12mm) */
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+    @bottom-left {
+      content: "Printed from EDL IMS";
+      font-size: 8pt;
+      font-family: inherit;
+      color: #555555;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      font-family: inherit;
+      color: #555555;
+    }
+  }
+
+  /* Wide landscape reports (e.g. Transaction History, Full Audit Log) */
+  @page landscape-report {
+    size: A4 landscape;
+    margin: 12mm;
+    @bottom-left {
+      content: "Printed from EDL IMS";
+      font-size: 8pt;
+      font-family: inherit;
+      color: #555555;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      font-family: inherit;
+      color: #555555;
+    }
+  }
+
+  .print-landscape {
+    page: landscape-report;
+  }
+
+  /* Force exact color rendering for company branding and status indicators */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Root & Layout Overrides */
+  html, body, #root, main {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    font-size: 9.5pt !important;
+    line-height: 1.35 !important;
+    box-shadow: none !important;
+  }
+
+  /* Hide screen-only interactive elements */
+  .no-print,
+  aside,
+  header:not(.print-report-header),
+  footer:not(.print-running-footer),
+  nav,
+  button:not(.print-include),
+  input:not(.print-include),
+  select:not(.print-include),
+  #sidebar,
+  #topbar,
+  #btn-back,
+  #btn-back-verification,
+  .modal-backdrop,
+  .toast,
+  [role="tooltip"] {
+    display: none !important;
+  }
+
+  /* Display print-only elements */
+  .print-only,
+  .print-report-header {
+    display: block !important;
+  }
+
+  /* Header Preservation & Sizing */
+  .print-report-header {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    width: 100% !important;
+    margin-bottom: 3.5mm !important;
+  }
+
+  .print-report-header .print-header-band {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding-top: 3.5mm !important;
+    padding-bottom: 3.5mm !important;
+  }
+
+  .print-report-header .print-header-logo {
+    height: 29mm !important;
+    max-height: 30mm !important;
+    width: auto !important;
+    object-fit: contain !important;
+    display: block !important;
+  }
+
+  .print-report-header .print-header-region {
+    font-family: "Times New Roman", Times, Georgia, serif !important;
+    font-size: 23pt !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    color: #000000 !important;
+  }
+
+  /* Running Footer Fallback for Chrome/Edge */
+  .print-running-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 8pt;
+    color: #555555;
+    border-top: 0.5pt solid #cccccc;
+    padding-top: 2mm;
+    background: #ffffff;
+    z-index: 999;
+  }
+
+  /* Table Optimization for Multi-Page Printing */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    break-inside: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important; /* Repeats thead on each printed page */
+    break-inside: avoid !important;
+  }
+
+  tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  td, th {
+    padding: 1.8mm 2.2mm !important;
+    border-color: #d1d5db !important;
+  }
+
+  /* Disable sticky and horizontal scrolling artifacts during print */
+  .sticky {
+    position: static !important;
+    box-shadow: none !important;
+  }
+
+  .overflow-x-auto,
+  .overflow-y-auto {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+}
+

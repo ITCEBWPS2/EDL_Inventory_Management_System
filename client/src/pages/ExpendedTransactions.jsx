@@ -7,6 +7,11 @@ import { AppShell } from '../components/layout/AppShell';
 import { RecordModal } from '../components/common/RecordModal';
 import { BackButton } from '../components/common/BackButton';
 import { DateInput } from '../components/common/DateInput';
+import { AddButton } from '../components/ui/AddButton';
+import { EditButton, DeleteButton } from '../components/ui/ActionButtons';
+import { Button } from '../components/common/Button';
+import { TablePagination } from '../components/common/TablePagination';
+import { TransactionsTable } from '../components/common/TransactionsTable';
 import { formatDate } from '../utils/formatters';
 import {
   Search,
@@ -41,7 +46,7 @@ const DEFAULT_DISPOSITIONS = [
 ];
 
 export const ExpendedTransactions = () => {
-  const { user, selectedUnitId, selectedUnit, canWrite } = useAuth();
+  const { user, selectedUnitId, selectedUnit, canWrite, can } = useAuth();
   const toast = useToast();
 
   const [transactions, setTransactions] = useState([]);
@@ -51,6 +56,8 @@ export const ExpendedTransactions = () => {
   const [loading, setLoading] = useState(true);
 
   // Filters & Search
+  const [selectedVoucherFilter, setSelectedVoucherFilter] = useState('');
+  const [selectedDateFilter, setSelectedDateFilter] = useState('');
   const [selectedItemFilter, setSelectedItemFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -252,16 +259,59 @@ export const ExpendedTransactions = () => {
     return `EV-${String(next).padStart(3, '0')}`;
   };
 
+  // Distinct Vouchers list for filter dropdown
+  const distinctVouchers = useMemo(() => {
+    const set = new Set();
+    transactions.forEach(t => {
+      if (t.voucher_no && t.voucher_no.trim()) {
+        set.add(t.voucher_no.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  // Distinct Dates list for filter dropdown
+  const distinctDates = useMemo(() => {
+    const set = new Set();
+    transactions.forEach(t => {
+      if (t.date && String(t.date).trim()) {
+        const d = String(t.date).split('T')[0].trim();
+        if (d) set.add(d);
+      }
+    });
+    return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  const hasNoDateRecords = useMemo(() => {
+    return transactions.some(t => !t.date || !String(t.date).trim());
+  }, [transactions]);
+
   // Filtered & Searched data
   const filteredTransactions = useMemo(() => {
     return transactions.filter(row => {
       const displayName = getItemDisplayName(row);
-      // 1. Item Filter
+
+      // 1. Voucher No filter
+      if (selectedVoucherFilter && row.voucher_no !== selectedVoucherFilter) {
+        return false;
+      }
+
+      // 2. Date filter
+      if (selectedDateFilter) {
+        const rowDate = row.date ? String(row.date).split('T')[0].trim() : '';
+        if (selectedDateFilter === '__NO_DATE__') {
+          if (rowDate) return false;
+        } else {
+          if (rowDate !== selectedDateFilter) return false;
+        }
+      }
+
+      // 3. Item Filter
       if (selectedItemFilter && displayName !== selectedItemFilter && row.item_name !== selectedItemFilter) {
         return false;
       }
 
-      // 2. Free-text Search Query
+      // 4. Free-text Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const vNo = (row.voucher_no || '').toLowerCase();
@@ -284,7 +334,7 @@ export const ExpendedTransactions = () => {
 
       return true;
     });
-  }, [transactions, selectedItemFilter, searchQuery, inventoryItems, receivedTransactions]);
+  }, [transactions, selectedVoucherFilter, selectedDateFilter, selectedItemFilter, searchQuery, inventoryItems, receivedTransactions]);
 
   // Pagination
   const totalPages = Math.ceil(filteredTransactions.length / pageSize) || 1;
@@ -461,249 +511,70 @@ export const ExpendedTransactions = () => {
           <h1 className="text-xl font-semibold text-ink tracking-tight">Expended Items</h1>
         </div>
 
-        {canWrite && (
-          <button
-            type="button"
-            onClick={handleOpenAdd}
-            id="btn-add-expended"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-ink hover:bg-ink/90 text-white text-xs font-semibold rounded-lg shadow-sm transition-all shrink-0 self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add</span>
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {can('add_inventory') && (
+            <AddButton
+              id="btn-add-expended"
+              label="Add"
+              onClick={handleOpenAdd}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Table Card Container */}
-      <div className="bg-card rounded-xl border border-line shadow-card overflow-hidden">
-        {/* Filter and Search Bar */}
-        <div className="p-4 border-b border-line flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface/40">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* "All Items" Filter Dropdown */}
-            <div className="relative min-w-[160px]">
-              <select
-                id="select-item-filter"
-                value={selectedItemFilter}
-                onChange={(e) => {
-                  setSelectedItemFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full text-xs bg-card border border-line rounded-lg py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
-                title="Filter by item"
-              >
-                <option value="">All Items</option>
-                {distinctItemNames.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
-            </div>
-
-            {/* Free-text Search Box */}
-            <div className="relative flex-1 min-w-[220px] max-w-sm">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate" />
-              <input
-                type="text"
-                id="input-expended-search"
-                placeholder="Search voucher, item, destination..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full pl-9 pr-8 py-2 text-xs bg-card border border-line rounded-lg focus:outline-none focus:border-signal text-ink placeholder-slate shadow-subtle"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setCurrentPage(1);
-                  }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate hover:text-ink p-0.5"
-                  title="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Reset Filters */}
-            {(selectedItemFilter || searchQuery) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedItemFilter('');
-                  setSearchQuery('');
-                  setCurrentPage(1);
-                }}
-                className="inline-flex items-center gap-1 text-xs text-[#B4483A] hover:underline font-medium px-2 py-1 transition-colors"
-                title="Reset filters"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset</span>
-              </button>
-            )}
-          </div>
-
-          <div className="text-xs text-slate shrink-0">
-            Showing <span className="font-semibold text-ink">{filteredTransactions.length}</span> records
-          </div>
-        </div>
-
-        {/* Wireframe Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-ink border-collapse">
-            <thead>
-              <tr className="border-b border-line bg-surface/70 font-semibold text-slate uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-4 w-12 text-center">No.</th>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Voucher No</th>
-                <th className="py-3 px-4">Item</th>
-                <th className="py-3 px-4 text-center">Qty</th>
-                <th className="py-3 px-4">To Whom Issued</th>
-                <th className="py-3 px-4">Description</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/60">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate">
-                    <div className="inline-block w-6 h-6 border-2 border-line border-t-ink rounded-full animate-spin mb-2"></div>
-                    <div>Loading expended transactions...</div>
-                  </td>
-                </tr>
-              ) : paginatedData.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate">
-                    <div className="text-sm font-medium text-ink">No expended records found.</div>
-                    <p className="text-xs mt-1 text-slate">Try adjusting your filter criteria or search query.</p>
-                  </td>
-                </tr>
-              ) : (
-                paginatedData.map((row, idx) => {
-                  const rowNumber = (currentPage - 1) * pageSize + idx + 1;
-                  const dateDisplay = formatDate(row.date);
-
-                  return (
-                    <tr
-                      key={row.id || idx}
-                      className="hover:bg-surface/50 transition-colors group"
-                    >
-                      {/* 1. No. */}
-                      <td className="py-3.5 px-4 text-center text-slate font-mono font-medium">
-                        {rowNumber}
-                      </td>
-
-                      {/* 2. Date */}
-                      <td className="py-3.5 px-4 font-mono text-slate whitespace-nowrap">
-                        {dateDisplay}
-                      </td>
-
-                      {/* 3. Voucher No */}
-                      <td className="py-3.5 px-4 font-mono font-semibold text-ink whitespace-nowrap">
-                        {row.voucher_no || '—'}
-                      </td>
-
-                      {/* 4. Item — just the item name, no separate item code line underneath */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-ink leading-tight">
-                          {getItemDisplayName(row)}
-                        </div>
-                      </td>
-
-                      {/* 5. Qty — plain number, not a colored badge */}
-                      <td className="py-3.5 px-4 text-center font-medium text-ink tabular-nums">
-                        {row.quantity}
-                      </td>
-
-                      {/* 6. To Whom Issued — short destination/recipient value */}
-                      <td className="py-3.5 px-4 font-medium text-ink">
-                        {row.disposition || '—'}
-                      </td>
-
-                      {/* 7. Description — saved notes with truncation and hover tooltip */}
-                      <td className="py-3.5 px-4 max-w-[220px]">
-                        {row.notes && row.notes.trim() ? (
-                          <span
-                            className="block truncate text-slate hover:text-ink cursor-default"
-                            title={row.notes}
-                          >
-                            {row.notes}
-                          </span>
-                        ) : (
-                          <span className="text-slate/40 font-mono text-sm">—</span>
-                        )}
-                      </td>
-
-                      {/* 8. Actions — separate Edit and Delete buttons (icon + label) */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
-                          {canWrite ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEdit(row, idx)}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-line rounded-lg text-ink hover:bg-surface hover:border-slate/40 transition-colors shadow-xs"
-                                title="Edit record"
-                              >
-                                <Pencil className="w-3.5 h-3.5 text-slate" />
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(row)}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[#B4483A]/10 text-[#B4483A] hover:bg-[#B4483A]/20 border border-[#B4483A]/20 rounded-lg transition-colors shadow-xs"
-                                title="Delete record"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Delete</span>
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-slate/40 text-xs italic">Read only</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="p-3.5 border-t border-line flex items-center justify-between bg-surface/30 text-xs text-slate">
-            <span>
-              Page <span className="font-semibold text-ink">{currentPage}</span> of{' '}
-              <span className="font-semibold text-ink">{totalPages}</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage(p => p - 1)}
-                className="p-1.5 border border-line rounded hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Previous page"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage(p => p + 1)}
-                className="p-1.5 border border-line rounded hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Next page"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Shared Transactions Table */}
+      <TransactionsTable
+        transactions={filteredTransactions}
+        paginatedData={paginatedData}
+        loading={loading}
+        canWrite={can('update_inventory')}
+        currentPage={currentPage}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        selectedVoucherFilter={selectedVoucherFilter}
+        onVoucherFilterChange={(v) => {
+          setSelectedVoucherFilter(v);
+          setCurrentPage(1);
+        }}
+        selectedDateFilter={selectedDateFilter}
+        onDateFilterChange={(d) => {
+          setSelectedDateFilter(d);
+          setCurrentPage(1);
+        }}
+        selectedItemFilter={selectedItemFilter}
+        onItemFilterChange={(i) => {
+          setSelectedItemFilter(i);
+          setCurrentPage(1);
+        }}
+        searchQuery={searchQuery}
+        onSearchQueryChange={(q) => {
+          setSearchQuery(q);
+          setCurrentPage(1);
+        }}
+        distinctVouchers={distinctVouchers}
+        distinctDates={distinctDates}
+        hasNoDateRecords={hasNoDateRecords}
+        distinctItems={distinctItemNames}
+        onResetFilters={() => {
+          setSelectedVoucherFilter('');
+          setSelectedDateFilter('');
+          setSelectedItemFilter('');
+          setSearchQuery('');
+          setCurrentPage(1);
+        }}
+        searchPlaceholder="Search voucher, date, destination, item..."
+        partyColumnHeader="To Whom Issued"
+        partyField="disposition"
+        onPartyClick={(party) => {
+          setSearchQuery(party);
+          setCurrentPage(1);
+        }}
+        getItemName={getItemDisplayName}
+        hasImageColumn={false}
+        onEdit={can('update_inventory') ? handleOpenEdit : null}
+        onDelete={can('delete_inventory') ? handleDelete : null}
+        emptyMessage="No expended records found."
+      />
 
       {/* Bottom Back Button */}
       <BackButton to="/transactions" id="btn-back-transactions" />
@@ -818,16 +689,16 @@ export const ExpendedTransactions = () => {
                   className="flex-1 px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink"
                   autoFocus
                 />
-                <button
-                  type="button"
+                <Button
+                  size="regular"
+                  variant="secondary"
                   onClick={() => {
                     setIsCustomDisposition(false);
                     setFormData(p => ({ ...p, disposition: DEFAULT_DISPOSITIONS[0] }));
                   }}
-                  className="px-3 py-2 border border-line rounded text-slate hover:text-ink transition-colors shrink-0"
-                >
-                  Choose from list
-                </button>
+                  label="Choose from list"
+                  className="shrink-0"
+                />
               </div>
             ) : (
               <select

@@ -5,7 +5,7 @@ const requireAuth = require('../middleware/requireAuth');
 const requirePermission = require('../middleware/requirePermission');
 
 router.use(requireAuth);
-router.use(requirePermission(['read_only', 'read_write']));
+router.use(requirePermission('view_reports'));
 
 router.get('/inventory', reportController.getCurrentInventory);
 router.get('/transactions', reportController.getTransactionHistory);

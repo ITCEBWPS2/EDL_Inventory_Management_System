@@ -1,14 +1,15 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ToastProvider } from './context/ToastContext';
+import { ToastProvider, useToast } from './context/ToastContext';
 
 // Pages
+import { Welcome } from './pages/Welcome';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { ForgotPassword } from './pages/ForgotPassword';
+import { UpdatePassword } from './pages/UpdatePassword';
 import { Dashboard } from './pages/Dashboard';
-import { InventoryList } from './pages/InventoryList';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { CategoryInventoryPage } from './pages/CategoryInventoryPage';
 import { ReceivedTransactions } from './pages/ReceivedTransactions';
@@ -21,14 +22,23 @@ import { VerificationHistory } from './pages/VerificationHistory';
 import { IssuedDestroyedPage } from './pages/IssuedDestroyedPage';
 import { AddIssuedDestroyedPage } from './pages/AddIssuedDestroyedPage';
 import { EditIssuedDestroyedPage } from './pages/EditIssuedDestroyedPage';
+import { DisposalRequestsListPage } from './pages/DisposalRequestsListPage';
+import { NewDisposalRequestPage } from './pages/NewDisposalRequestPage';
+import { DisposalRequestDetailPage } from './pages/DisposalRequestDetailPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { ReportsOverviewPage } from './pages/ReportsOverviewPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { UnitManagementPage } from './pages/UnitManagementPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AuditLogPage } from './pages/AuditLogPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Protected Route Guard
-const ProtectedRoute = ({ children, allowedRoles = [], requireWrite = false }) => {
-  const { user, loading, canRead, canWrite, isSuperAdmin, logout } = useAuth();
+const ProtectedRoute = ({ children, allowedRoles = [], requireWrite = false, requiredPermission = null }) => {
+  const { user, loading, canRead, canWrite, isSuperAdmin, logout, can } = useAuth();
+  const location = useLocation();
+  const toast = useToast();
 
   if (loading) {
     return (
@@ -45,8 +55,18 @@ const ProtectedRoute = ({ children, allowedRoles = [], requireWrite = false }) =
     return <Navigate to="/login" replace />;
   }
 
-  // Check if blocked by 'no_permission'
-  if (!canRead && !isSuperAdmin) {
+  // Central redirect for disposal_only users:
+  if (user.permission_level === 'disposal_only') {
+    const isDisposalPath = location.pathname.startsWith('/disposal');
+    if (!isDisposalPath) {
+      toast.error('Access denied: Your account is restricted to Disposal Requests.');
+      return <Navigate to="/disposal-requests" replace />;
+    }
+  }
+
+  // Check if blocked by 'no_permission' (allow access to disposal requests)
+  const isDisposalRoute = location.pathname.startsWith('/disposal');
+  if (!canRead && !isSuperAdmin && !isDisposalRoute) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center p-4">
         <div className="bg-card rounded-xl border border-line p-8 max-w-md text-center shadow-card">
@@ -71,6 +91,11 @@ const ProtectedRoute = ({ children, allowedRoles = [], requireWrite = false }) =
     );
   }
 
+  // Check granular permission if specified
+  if (requiredPermission && !can(requiredPermission)) {
+    return <Navigate to="/" replace />;
+  }
+
   // Check if write permission is required (e.g. creating new verification)
   if (requireWrite && !canWrite) {
     return <Navigate to="/" replace />;
@@ -84,65 +109,148 @@ const ProtectedRoute = ({ children, allowedRoles = [], requireWrite = false }) =
   return children;
 };
 
+// Redirect component for /disposal/:id
+const DisposalIdRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={`/disposal-requests/${id}`} replace />;
+};
+
+// Public Welcome / Home Route Guard: Guest -> Welcome, Authenticated -> Dashboard
+const HomeRoute = () => {
+  const { user, loading } = useAuth();
+  const hasPersistedToken = !!localStorage.getItem('edl_token');
+
+  // If there's no persisted session token, guest immediately sees Welcome without any flash
+  if (!hasPersistedToken && !user) {
+    return <Welcome />;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-3 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+          <div className="text-xs text-slate-300 font-medium">Verifying EDL staff credentials...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    if (user.permission_level === 'disposal_only') {
+      return <Navigate to="/disposal-requests" replace />;
+    }
+    return (
+      <ProtectedRoute>
+        <Dashboard />
+      </ProtectedRoute>
+    );
+  }
+
+  return <Welcome />;
+};
+
+const WelcomeRoute = () => {
+  const { user, loading } = useAuth();
+  const hasPersistedToken = !!localStorage.getItem('edl_token');
+
+  if (!hasPersistedToken && !user) {
+    return <Welcome />;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-3 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+          <div className="text-xs text-slate-300 font-medium">Verifying EDL staff credentials...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/" replace />;
+  }
+  return <Welcome />;
+};
+
 export default function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
         <AuthProvider>
-          <Routes>
-            {/* Public Auth Routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+          <ErrorBoundary level="page">
+            <Routes>
+              {/* Public Auth & Welcome Routes */}
+              <Route path="/welcome" element={<WelcomeRoute />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/update-password" element={<UpdatePassword />} />
 
-            {/* Core Protected Routes */}
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            
-            {/* 1. Inventory */}
-            <Route path="/inventory" element={<ProtectedRoute><InventoryList /></ProtectedRoute>} />
-            <Route path="/inventory/categories" element={<ProtectedRoute><CategoriesPage /></ProtectedRoute>} />
-            <Route path="/inventory/category/:categoryId" element={<ProtectedRoute><CategoryInventoryPage /></ProtectedRoute>} />
-            <Route path="/inventory/category/:categoryId/:subType" element={<ProtectedRoute><CategoryInventoryPage /></ProtectedRoute>} />
-            <Route path="/inventory/categories/:categoryId" element={<ProtectedRoute><CategoryInventoryPage /></ProtectedRoute>} />
-            <Route path="/inventory/categories/:categoryId/:subType" element={<ProtectedRoute><CategoryInventoryPage /></ProtectedRoute>} />
+              {/* Core Route: Welcome if guest, Dashboard if authenticated */}
+              <Route path="/" element={<HomeRoute />} />
 
-            {/* 2. Transactions */}
-            <Route path="/transactions" element={<ProtectedRoute><TransactionsOverviewPage /></ProtectedRoute>} />
-            <Route path="/transactions/received" element={<ProtectedRoute><ReceivedTransactions /></ProtectedRoute>} />
-            <Route path="/transactions/expended" element={<ProtectedRoute><ExpendedTransactions /></ProtectedRoute>} />
-            <Route path="/transactions/remaining" element={<ProtectedRoute><RemainingInventory /></ProtectedRoute>} />
+              {/* 1. Inventory */}
+              <Route path="/inventory" element={<Navigate to="/inventory/categories" replace />} />
+              <Route path="/inventory/categories" element={<ProtectedRoute requiredPermission="view_inventory"><CategoriesPage /></ProtectedRoute>} />
+              <Route path="/inventory/category/:categoryId" element={<ProtectedRoute requiredPermission="view_inventory"><CategoryInventoryPage /></ProtectedRoute>} />
+              <Route path="/inventory/category/:categoryId/:subType" element={<ProtectedRoute requiredPermission="view_inventory"><CategoryInventoryPage /></ProtectedRoute>} />
+              <Route path="/inventory/categories/:categoryId" element={<ProtectedRoute requiredPermission="view_inventory"><CategoryInventoryPage /></ProtectedRoute>} />
+              <Route path="/inventory/categories/:categoryId/:subType" element={<ProtectedRoute requiredPermission="view_inventory"><CategoryInventoryPage /></ProtectedRoute>} />
 
-            {/* 3. Annual Verification */}
-            <Route path="/verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
-            <Route path="/annual-verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
-            <Route path="/verification/new" element={<ProtectedRoute requireWrite={true}><NewVerification /></ProtectedRoute>} />
-            <Route path="/verification/history" element={<ProtectedRoute><VerificationHistory /></ProtectedRoute>} />
-            <Route path="/verification/issued-destroyed" element={<ProtectedRoute><IssuedDestroyedPage /></ProtectedRoute>} />
-            <Route path="/verification/issued-destroyed/add" element={<ProtectedRoute requireWrite={true}><AddIssuedDestroyedPage /></ProtectedRoute>} />
-            <Route path="/verification/issued-destroyed/:id/edit" element={<ProtectedRoute requireWrite={true}><EditIssuedDestroyedPage /></ProtectedRoute>} />
+              {/* 2. Transactions */}
+              <Route path="/transactions" element={<ProtectedRoute requiredPermission="view_inventory"><TransactionsOverviewPage /></ProtectedRoute>} />
+              <Route path="/transactions/received" element={<ProtectedRoute requiredPermission="view_inventory"><ReceivedTransactions /></ProtectedRoute>} />
+              <Route path="/transactions/expended" element={<ProtectedRoute requiredPermission="view_inventory"><ExpendedTransactions /></ProtectedRoute>} />
+              <Route path="/transactions/remaining" element={<ProtectedRoute requiredPermission="view_inventory"><RemainingInventory /></ProtectedRoute>} />
 
-            {/* 4. Reports */}
-            <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
-            <Route path="/reports/:tab" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+              {/* 3. Annual Verification */}
+              <Route path="/verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
+              <Route path="/annual-verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
+              <Route path="/verification/new" element={<ProtectedRoute requiredPermission="add_inventory"><NewVerification /></ProtectedRoute>} />
+              <Route path="/verification/history" element={<ProtectedRoute><VerificationHistory /></ProtectedRoute>} />
+              <Route path="/verification/issued-destroyed" element={<ProtectedRoute><IssuedDestroyedPage /></ProtectedRoute>} />
+              <Route path="/verification/issued-destroyed/add" element={<ProtectedRoute requiredPermission="add_inventory"><AddIssuedDestroyedPage /></ProtectedRoute>} />
+              <Route path="/verification/issued-destroyed/:id/edit" element={<ProtectedRoute requiredPermission="update_inventory"><EditIssuedDestroyedPage /></ProtectedRoute>} />
 
-            {/* 5. User Management (Admin Only) */}
-            <Route path="/users" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'local_admin']}>
-                <UserManagementPage />
-              </ProtectedRoute>
-            } />
+              {/* Disposal Requests with /disposal aliases */}
+              <Route path="/disposal" element={<Navigate to="/disposal-requests" replace />} />
+              <Route path="/disposal/new" element={<Navigate to="/disposal-requests/new" replace />} />
+              <Route path="/disposal/:id" element={<DisposalIdRedirect />} />
+              <Route path="/disposal-requests" element={<ProtectedRoute><DisposalRequestsListPage /></ProtectedRoute>} />
+              <Route path="/disposal-requests/new" element={<ProtectedRoute><NewDisposalRequestPage /></ProtectedRoute>} />
+              <Route path="/disposal-requests/:id" element={<ProtectedRoute><DisposalRequestDetailPage /></ProtectedRoute>} />
 
-            {/* 6. Settings */}
-            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-            <Route path="/settings/units" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'local_admin']}>
-                <UnitManagementPage />
-              </ProtectedRoute>
-            } />
+              {/* 4. Reports */}
+              <Route path="/reports" element={<ProtectedRoute requiredPermission="view_reports"><ReportsOverviewPage /></ProtectedRoute>} />
+              <Route path="/reports/:tab" element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage /></ProtectedRoute>} />
 
-            {/* Fallback redirect */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              {/* 5. User Management (Admin Only) */}
+              <Route path="/users" element={
+                <ProtectedRoute allowedRoles={['super_admin', 'local_admin']} requiredPermission="manage_permissions">
+                  <UserManagementPage />
+                </ProtectedRoute>
+              } />
+
+              {/* 6. Settings */}
+              <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+              <Route path="/settings/units" element={
+                <ProtectedRoute allowedRoles={['super_admin', 'local_admin']}>
+                  <UnitManagementPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/settings/audit-log" element={
+                <ProtectedRoute allowedRoles={['super_admin', 'local_admin', 'unit_head']}>
+                  <AuditLogPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Catch-all 404 Route */}
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </ErrorBoundary>
         </AuthProvider>
       </ToastProvider>
     </BrowserRouter>

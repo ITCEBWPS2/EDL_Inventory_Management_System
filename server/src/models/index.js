@@ -9,6 +9,10 @@ const Verification = require('./Verification');
 const VerificationItem = require('./VerificationItem');
 const IssuedDestroyedItem = require('./IssuedDestroyedItem');
 const SerialCounter = require('./SerialCounter');
+const AuditLog = require('./AuditLog');
+const ItemType = require('./ItemType');
+const DisposalRequest = require('./DisposalRequest');
+const Notification = require('./Notification');
 
 /**
  * Strips MongoDB _id and __v from objects or arrays of objects.
@@ -39,5 +43,9 @@ module.exports = {
   VerificationItem,
   IssuedDestroyedItem,
   SerialCounter,
+  AuditLog,
+  ItemType,
+  DisposalRequest,
+  Notification,
   stripMongo
 };

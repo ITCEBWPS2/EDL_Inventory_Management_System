@@ -108,7 +108,7 @@ test('User Email Mandatory & Validation Enforcement Tests', async (t) => {
     assert.equal(resWhitespace.body.message, 'Email address is required.');
   });
 
-  await t.test('2. Create with invalid email returns 400 "Please enter a valid email address."', async () => {
+  await t.test('2. Create with invalid email returns 400 format error', async () => {
     const invalidEmails = [
       'plainaddress',
       'missingatsign.com',
@@ -131,7 +131,33 @@ test('User Email Mandatory & Validation Enforcement Tests', async (t) => {
 
       assert.equal(res.status, 400, `Failed to reject invalid email: ${badEmail}`);
       assert.equal(res.body.success, false);
-      assert.equal(res.body.message, 'Please enter a valid email address.');
+      assert.equal(res.body.message, 'Enter a valid email address, for example name@edl.lk.');
+    }
+  });
+
+  await t.test('2b. Create with non-EDL domain returns 400 corporate domain error', async () => {
+    const nonEdlEmails = [
+      'user@gmail.com',
+      'admin@yahoo.com',
+      'staff@hotmail.com',
+      'test@edl.com',
+      'fake@edl.org'
+    ];
+
+    for (const badEmail of nonEdlEmails) {
+      const res = await request('/users', 'POST', {
+        username: `non_edl_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        full_name: 'Non EDL Email User',
+        email: badEmail,
+        role: 'employee',
+        permission_level: 'read_write',
+        password: 'password123',
+        unit_id: targetUnit.id
+      }, superAdminToken);
+
+      assert.equal(res.status, 400, `Failed to reject non-EDL email: ${badEmail}`);
+      assert.equal(res.body.success, false);
+      assert.equal(res.body.message, 'Enter a valid EDL corporate email address ending in @edl.lk (e.g. name@edl.lk).');
     }
   });
 
@@ -292,6 +318,18 @@ test('User Email Mandatory & Validation Enforcement Tests', async (t) => {
     }, superAdminToken);
     assert.equal(invalidRes.status, 400);
     assert.equal(invalidRes.body.success, false);
-    assert.equal(invalidRes.body.message, 'Please enter a valid email address.');
+    assert.equal(invalidRes.body.message, 'Enter a valid email address, for example name@edl.lk.');
+
+    // Non-EDL domain email
+    const nonEdlRes = await request(`/users/${userId}`, 'PUT', {
+      full_name: 'Non EDL Target Updated',
+      email: 'user@gmail.com',
+      role: 'employee',
+      permission_level: 'read_write',
+      unit_id: targetUnit.id
+    }, superAdminToken);
+    assert.equal(nonEdlRes.status, 400);
+    assert.equal(nonEdlRes.body.success, false);
+    assert.equal(nonEdlRes.body.message, 'Enter a valid EDL corporate email address ending in @edl.lk (e.g. name@edl.lk).');
   });
 });

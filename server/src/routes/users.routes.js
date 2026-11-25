@@ -3,10 +3,12 @@ const router = express.Router();
 const userController = require('../controllers/userController');
 const requireAuth = require('../middleware/requireAuth');
 const requireRole = require('../middleware/requireRole');
+const requirePermission = require('../middleware/requirePermission');
 
 // Users management routes: Super Admin and Local Admin only
 router.use(requireAuth);
 router.use(requireRole(['super_admin', 'local_admin']));
+router.use(requirePermission('manage_permissions'));
 
 router.get('/', userController.getAllUsers);
 router.post('/', userController.createUser);

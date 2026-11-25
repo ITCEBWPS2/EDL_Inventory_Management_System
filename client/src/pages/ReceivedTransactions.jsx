@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -7,7 +8,14 @@ import { AppShell } from '../components/layout/AppShell';
 import { RecordModal } from '../components/common/RecordModal';
 import { BackButton } from '../components/common/BackButton';
 import { DateInput } from '../components/common/DateInput';
+import { FileUploadBox } from '../components/common/FileUploadBox';
+import { AddButton } from '../components/ui/AddButton';
+import { EditButton, DeleteButton, IconActionButton } from '../components/ui/ActionButtons';
+import { Button } from '../components/common/Button';
+import { TablePagination } from '../components/common/TablePagination';
+import { TransactionsTable } from '../components/common/TransactionsTable';
 import { formatDate } from '../utils/formatters';
+import { validateAttachmentFile } from '../constants/upload';
 import {
   Search,
   Filter,
@@ -29,7 +37,8 @@ import {
   SUBTYPE_METADATA,
   getCategorySubtypes,
   buildCategoryItemUnion,
-  itemMatchesSubType
+  itemMatchesSubType,
+  registerCustomSubtypes
 } from '../constants/categorySubtypes';
 
 const INITIAL_SENDERS = [
@@ -52,7 +61,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export const ReceivedTransactions = () => {
-  const { user, selectedUnitId, selectedUnit, canWrite } = useAuth();
+  const { user, selectedUnitId, selectedUnit, canWrite, can } = useAuth();
   const toast = useToast();
 
   const [transactions, setTransactions] = useState([]);
@@ -99,27 +108,34 @@ export const ReceivedTransactions = () => {
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
-  const fileInputRef = useRef(null);
 
   // Info Modal & Image Preview Modal State
   const [detailModalItem, setDetailModalItem] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const detailBackdropRef = useRef(false);
+  const previewBackdropRef = useRef(false);
 
   // Configuration switch: whether From Whom Received is required
-  const [isSenderRequired, setIsSenderRequired] = useState(
-    () => import.meta.env.VITE_REQUIRE_RECEIVED_SENDER === 'true'
-  );
+  const [isSenderRequired, setIsSenderRequired] = useState(true);
+
+  // Field-level validation errors and touched state
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [touchedFields, setTouchedFields] = useState({});
 
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [txRes, itemsRes, catRes, configRes] = await Promise.all([
+      const [txRes, itemsRes, catRes, configRes, typesRes] = await Promise.all([
         api.get('/transactions/received', { unit_id: selectedUnitId }),
         api.get('/inventory', { all: 'true' }),
         api.get('/inventory/categories'),
-        api.get('/transactions/config').catch(() => null)
+        api.get('/transactions/config').catch(() => null),
+        api.get('/inventory/types').catch(() => null)
       ]);
+      if (typesRes && typesRes.success && Array.isArray(typesRes.data)) {
+        registerCustomSubtypes(typesRes.data);
+      }
       if (configRes && configRes.success && configRes.data) {
         setIsSenderRequired(Boolean(configRes.data.require_received_sender));
       }
@@ -368,12 +384,66 @@ export const ReceivedTransactions = () => {
     fetchCategoryItems(catId);
   };
 
+  // Validation helper
+  const validateForm = (dataToValidate = formData, customSender = isCustomSender, searchText = senderSearchText) => {
+    const errs = {};
+
+    // Date
+    if (!dataToValidate.date || !String(dataToValidate.date).trim()) {
+      errs.date = 'Date is required';
+    } else if (isNaN(new Date(String(dataToValidate.date).trim()).getTime())) {
+      errs.date = 'Date is invalid';
+    }
+
+    // Category
+    if (!dataToValidate.category_id) {
+      errs.category_id = 'Item category is required';
+    }
+
+    // Item
+    const trimmedItem = (dataToValidate.item_name || '').trim();
+    if (!trimmedItem) {
+      errs.item_name = 'Item is required';
+    }
+
+    // From Whom Received
+    const finalSender = (customSender ? dataToValidate.from_whom : (dataToValidate.from_whom || searchText || '')).trim();
+    if (!finalSender) {
+      errs.from_whom = 'From whom received is required';
+    }
+
+    // Quantity
+    if (dataToValidate.quantity === undefined || dataToValidate.quantity === null || String(dataToValidate.quantity).trim() === '' || Number(dataToValidate.quantity) < 1) {
+      errs.quantity = 'Quantity must be at least 1';
+    }
+
+    return errs;
+  };
+
+  const clearFieldError = (field) => {
+    setFieldErrors(prev => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const handleFieldBlur = (field) => {
+    setTouchedFields(prev => ({ ...prev, [field]: true }));
+    const currentErrors = validateForm();
+    if (currentErrors[field]) {
+      setFieldErrors(prev => ({ ...prev, [field]: currentErrors[field] }));
+    } else {
+      clearFieldError(field);
+    }
+  };
+
   // Open Add Modal
   const handleOpenAdd = async () => {
     setIsEditing(false);
     setEditingId(null);
     const nextNo = transactions.length + 1;
-    const defaultSender = isSenderRequired ? 'Finco Furnitures' : '';
 
     setFormData({
       row_no: nextNo,
@@ -382,12 +452,12 @@ export const ReceivedTransactions = () => {
       category_id: '',
       item_name: '',
       quantity: 1,
-      from_whom: defaultSender,
+      from_whom: '',
       notes: '',
       voucher_url: null
     });
 
-    setSenderSearchText(defaultSender);
+    setSenderSearchText('');
     setIsSenderDropdownOpen(false);
     setIsCustomSender(false);
 
@@ -395,6 +465,8 @@ export const ReceivedTransactions = () => {
     setItemSearchText('');
     setIsItemDropdownOpen(false);
     setItemsLoading(false);
+    setFieldErrors({});
+    setTouchedFields({});
 
     setSelectedFile(null);
     setModalOpen(true);
@@ -442,6 +514,8 @@ export const ReceivedTransactions = () => {
     setItemSearchText(row.item_name || '');
     setIsItemDropdownOpen(false);
 
+    setFieldErrors({});
+    setTouchedFields({});
     setSelectedFile(null);
     setModalOpen(true);
   };
@@ -456,41 +530,46 @@ export const ReceivedTransactions = () => {
     setCategoryItems([]);
     setItemSearchText('');
     setItemsLoading(false);
-  };
-
-  const handleFileSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-    }
+    setFieldErrors({});
+    setTouchedFields({});
   };
 
   // Save Transaction (Add or Edit)
   const handleSave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
 
-    if (!formData.category_id) {
-      toast.error('Please select an item category.');
+    const clientErrors = validateForm();
+    setTouchedFields({
+      date: true,
+      category_id: true,
+      item_name: true,
+      from_whom: true,
+      quantity: true
+    });
+    setFieldErrors(clientErrors);
+
+    if (Object.keys(clientErrors).length > 0) {
+      // Focus first invalid field
+      if (clientErrors.date) {
+        document.getElementById('input-received-date')?.focus();
+      } else if (clientErrors.category_id) {
+        document.getElementById('select-modal-item-category')?.focus();
+      } else if (clientErrors.item_name) {
+        document.getElementById('input-modal-item-name')?.focus();
+      } else if (clientErrors.from_whom) {
+        if (isCustomSender) {
+          document.getElementById('input-modal-custom-sender')?.focus();
+        } else {
+          document.getElementById('input-modal-search-sender')?.focus();
+        }
+      } else if (clientErrors.quantity) {
+        document.getElementById('input-modal-quantity')?.focus();
+      }
       return;
     }
 
     const trimmedItemName = (formData.item_name || '').trim();
-    if (!trimmedItemName) {
-      toast.error('Please select an item.');
-      return;
-    }
-
-    // Resolve sender
     const finalSender = (isCustomSender ? formData.from_whom : (formData.from_whom || senderSearchText || '')).trim();
-    if (isSenderRequired && !finalSender) {
-      toast.error('Please select or specify who the item was received from.');
-      return;
-    }
-
-    if (Number(formData.quantity) < 1) {
-      toast.error('Quantity must be at least 1.');
-      return;
-    }
 
     setModalLoading(true);
     try {
@@ -514,6 +593,12 @@ export const ReceivedTransactions = () => {
       if (unitId) payload.append('unit_id', unitId);
 
       if (selectedFile) {
+        const fileCheck = validateAttachmentFile(selectedFile);
+        if (!fileCheck.valid) {
+          toast.error(fileCheck.error);
+          setModalLoading(false);
+          return;
+        }
         payload.append('voucher_image', selectedFile);
       }
 
@@ -528,7 +613,44 @@ export const ReceivedTransactions = () => {
       handleCloseModal();
       await fetchData();
     } catch (err) {
-      toast.error(err.message || 'Failed to save received record.');
+      // Server error mapping
+      const errData = err.data || {};
+      const errMsg = String(err.message || '');
+      const serverErrorsList = Array.isArray(errData.errors) ? errData.errors : [errMsg];
+      const mappedErrors = {};
+
+      serverErrorsList.forEach(msg => {
+        const lower = String(msg).toLowerCase();
+        if (lower.includes('date is required')) {
+          mappedErrors.date = 'Date is required';
+        } else if (lower.includes('date is invalid')) {
+          mappedErrors.date = 'Date is invalid';
+        }
+        if (lower.includes('from whom') || lower.includes('sender')) {
+          mappedErrors.from_whom = 'From whom received is required';
+        }
+        if (lower.includes('item name is required')) {
+          mappedErrors.item_name = 'Item is required';
+        }
+        if (lower.includes('quantity')) {
+          mappedErrors.quantity = 'Quantity must be at least 1';
+        }
+      });
+
+      if (Object.keys(mappedErrors).length > 0) {
+        setFieldErrors(prev => ({ ...prev, ...mappedErrors }));
+        if (mappedErrors.date) {
+          document.getElementById('input-received-date')?.focus();
+        } else if (mappedErrors.from_whom) {
+          if (isCustomSender) {
+            document.getElementById('input-modal-custom-sender')?.focus();
+          } else {
+            document.getElementById('input-modal-search-sender')?.focus();
+          }
+        }
+      } else {
+        toast.error(err.message || 'Failed to save received record.');
+      }
     } finally {
       setModalLoading(false);
     }
@@ -555,350 +677,79 @@ export const ReceivedTransactions = () => {
 
   return (
     <AppShell breadcrumbs={[{ label: 'Transactions', path: '/transactions' }, { label: 'Received Items' }]}>
-      {/* Header — subtitle text removed per requirement 4 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+      {/* Header with Add button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-xl font-semibold text-ink tracking-tight">Received Items</h1>
         </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {can('add_inventory') && (
+            <AddButton
+              id="btn-add-received-record"
+              label="Add"
+              onClick={handleOpenAdd}
+              title="Add Received Record"
+            />
+          )}
+        </div>
       </div>
 
-      {/* Table Container Card */}
-      <div className="bg-card rounded-xl border border-line shadow-card overflow-hidden">
-        {/* Filter and Search Bar — filtering by Voucher No, Date, and Item */}
-        <div className="p-4 border-b border-line flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-surface/40">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* Filter by Voucher No */}
-            <div className="relative min-w-[145px]">
-              <select
-                id="select-voucher-filter"
-                value={selectedVoucherFilter}
-                onChange={(e) => {
-                  setSelectedVoucherFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
-                title="Filter by Voucher Number"
-              >
-                <option value="">All Vouchers</option>
-                {distinctVouchers.map(vNo => (
-                  <option key={vNo} value={vNo}>{vNo}</option>
-                ))}
-              </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
-            </div>
-
-              {/* Filter by Date */}
-              <div className="relative min-w-[135px]">
-                <select
-                  id="select-date-filter"
-                  value={selectedDateFilter}
-                  onChange={(e) => {
-                    setSelectedDateFilter(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="w-full text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
-                  title="Filter by Receipt Date"
-                >
-                  <option value="">All Dates</option>
-                  {hasNoDateRecords && <option value="__NO_DATE__">No Date (—)</option>}
-                  {distinctDates.map(date => (
-                    <option key={date} value={date}>{formatDate(date)}</option>
-                  ))}
-                </select>
-                <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
-              </div>
-
-            {/* Filter by Item */}
-            <div className="relative min-w-[145px]">
-              <select
-                id="select-item-filter"
-                value={selectedItemFilter}
-                onChange={(e) => {
-                  setSelectedItemFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
-                title="Filter by item type"
-              >
-                <option value="">All Items</option>
-                {distinctItemNames.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
-            </div>
-
-            {/* Search Input Box */}
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate" />
-              <input
-                type="text"
-                id="input-received-search"
-                placeholder="Search voucher, date, sender, item..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full pl-9 pr-8 py-2 text-xs bg-card border border-line rounded focus:outline-none focus:border-signal text-ink placeholder-slate shadow-subtle"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setCurrentPage(1);
-                  }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate hover:text-ink p-0.5"
-                  title="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Clear All Filters Button */}
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedVoucherFilter('');
-                  setSelectedDateFilter('');
-                  setSelectedItemFilter('');
-                  setSearchQuery('');
-                  setCurrentPage(1);
-                }}
-                className="inline-flex items-center gap-1 text-xs text-[#B4483A] hover:underline font-medium px-2 py-1 transition-colors"
-                title="Reset all filters"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset Filters</span>
-              </button>
-            )}
-          </div>
-
-          <div className="text-xs text-slate shrink-0">
-            Showing <span className="font-semibold text-ink">{filteredTransactions.length}</span> records
-          </div>
-        </div>
-
-        {/* Simplified Table matching specification */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-ink border-collapse">
-            <thead>
-              <tr className="border-b border-line bg-surface/70 font-semibold text-slate uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-4 w-12 text-center">No</th>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Voucher No</th>
-                <th className="py-3 px-4">Item</th>
-                <th className="py-3 px-4 text-center">Qty</th>
-                <th className="py-3 px-4">From Whom Received</th>
-                <th className="py-3 px-4 text-center">Image</th>
-                <th className="py-3 px-4 text-center">Info</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/60">
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate">
-                    <div className="inline-block w-6 h-6 border-2 border-line border-t-ink rounded-full animate-spin mb-2"></div>
-                    <div>Loading received transactions...</div>
-                  </td>
-                </tr>
-              ) : paginatedData.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate">
-                    <div className="text-sm font-medium text-ink">No received stock transactions found.</div>
-                    <p className="text-xs mt-1 text-slate">Try adjusting your filter criteria or search query.</p>
-                  </td>
-                </tr>
-              ) : (
-                paginatedData.map((row, idx) => {
-                  const rowNumber = (currentPage - 1) * pageSize + idx + 1;
-                  const dateDisplay = formatDate(row.date);
-                  const hasExtraInfo = Boolean(
-                    (row.notes && row.notes.trim()) ||
-                    (row.serial_number && row.serial_number.trim())
-                  );
-
-                  return (
-                    <tr
-                      key={row.id || idx}
-                      className="hover:bg-surface/50 transition-colors group"
-                    >
-                      {/* 1. No */}
-                      <td className="py-3.5 px-4 text-center text-slate font-mono font-medium">
-                        {rowNumber}
-                      </td>
-
-                      {/* 2. Date */}
-                      <td className="py-3.5 px-4 font-mono text-slate whitespace-nowrap">
-                        {dateDisplay}
-                      </td>
-
-                      {/* 3. Voucher No */}
-                      <td className="py-3.5 px-4 font-mono font-semibold text-ink whitespace-nowrap">
-                        {row.voucher_no || '—'}
-                      </td>
-
-                      {/* 4. Item */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-ink leading-tight">
-                          {row.item_name || '—'}
-                        </div>
-                      </td>
-
-                      {/* 5. Qty (small dark badge/pill) */}
-                      <td className="py-3.5 px-4 text-center">
-                        <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-ink text-white min-w-[24px]">
-                          {row.quantity}
-                        </span>
-                      </td>
-
-                      {/* 6. From Whom Received (styled as link / highlighted text if non-empty, plain dash if empty) */}
-                      <td className="py-3.5 px-4">
-                        {row.from_whom?.trim() ? (
-                          <span
-                            onClick={() => {
-                              setSearchQuery(row.from_whom);
-                              setCurrentPage(1);
-                            }}
-                            className="text-signal hover:underline font-medium cursor-pointer transition-colors"
-                            title="Click to search records from this sender"
-                          >
-                            {row.from_whom}
-                          </span>
-                        ) : (
-                          <span className="text-slate/60 font-mono">—</span>
-                        )}
-                      </td>
-
-                      {/* 7. Image ("—" or thumbnail/icon) */}
-                      <td className="py-3.5 px-4 text-center">
-                        {row.voucher_url ? (
-                          <button
-                            type="button"
-                            onClick={() => setPreviewImage(row.voucher_url)}
-                            className="inline-flex items-center justify-center p-0.5 rounded border border-line hover:border-signal transition-colors group/img"
-                            title="Click to preview voucher image"
-                          >
-                            <img
-                              src={row.voucher_url}
-                              alt="Voucher"
-                              className="w-7 h-7 object-cover rounded"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                                if (e.currentTarget.nextSibling) {
-                                  e.currentTarget.nextSibling.style.display = 'inline-flex';
-                                }
-                              }}
-                            />
-                            <span className="hidden w-7 h-7 rounded bg-surface items-center justify-center text-signal">
-                              <Eye className="w-3.5 h-3.5" />
-                            </span>
-                          </button>
-                        ) : (
-                          <span className="text-slate/50 font-mono text-sm">—</span>
-                        )}
-                      </td>
-
-                      {/* 8. Info (ⓘ icon, hover/click details, disabled/greyed if no extra info) */}
-                      <td className="py-3.5 px-4 text-center">
-                        {hasExtraInfo ? (
-                          <button
-                            type="button"
-                            onClick={() => setDetailModalItem(row)}
-                            className="p-1 rounded-full text-signal hover:bg-signal/10 transition-colors inline-flex items-center justify-center"
-                            title={`Details: ${row.notes || ''} ${row.serial_number ? `(SN: ${row.serial_number})` : ''}`}
-                          >
-                            <Info className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <span
-                            className="p-1 text-slate/30 cursor-not-allowed inline-flex items-center justify-center"
-                            title="No additional information"
-                          >
-                            <Info className="w-4 h-4" />
-                          </span>
-                        )}
-                      </td>
-
-                      {/* 9. Actions (Edit outline button, Delete red button) */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
-                          {canWrite && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEdit(row, idx)}
-                              className="px-2.5 py-1 text-xs border border-line rounded text-ink hover:bg-surface hover:border-slate/40 font-medium transition-colors"
-                            >
-                              Edit
-                            </button>
-                          )}
-                          {canWrite && (
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(row)}
-                              className="px-2.5 py-1 text-xs bg-[#B4483A] hover:bg-[#9B3C2F] text-white rounded font-medium transition-colors shadow-2xs"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination Footer */}
-        {filteredTransactions.length > pageSize && (
-          <div className="p-3 border-t border-line flex items-center justify-between text-xs text-slate bg-surface/40">
-            <div>
-              Page <span className="font-semibold text-ink tabular-nums">{currentPage}</span> of{' '}
-              <span className="font-semibold text-ink tabular-nums">{totalPages}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Previous page"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage >= totalPages}
-                className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Next page"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Shared Transactions Table */}
+      <TransactionsTable
+        transactions={filteredTransactions}
+        paginatedData={paginatedData}
+        loading={loading}
+        canWrite={can('update_inventory')}
+        currentPage={currentPage}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        selectedVoucherFilter={selectedVoucherFilter}
+        onVoucherFilterChange={(v) => {
+          setSelectedVoucherFilter(v);
+          setCurrentPage(1);
+        }}
+        selectedDateFilter={selectedDateFilter}
+        onDateFilterChange={(d) => {
+          setSelectedDateFilter(d);
+          setCurrentPage(1);
+        }}
+        selectedItemFilter={selectedItemFilter}
+        onItemFilterChange={(i) => {
+          setSelectedItemFilter(i);
+          setCurrentPage(1);
+        }}
+        searchQuery={searchQuery}
+        onSearchQueryChange={(q) => {
+          setSearchQuery(q);
+          setCurrentPage(1);
+        }}
+        distinctVouchers={distinctVouchers}
+        distinctDates={distinctDates}
+        hasNoDateRecords={hasNoDateRecords}
+        distinctItems={distinctItemNames}
+        onResetFilters={() => {
+          setSelectedVoucherFilter('');
+          setSelectedDateFilter('');
+          setSelectedItemFilter('');
+          setSearchQuery('');
+          setCurrentPage(1);
+        }}
+        searchPlaceholder="Search voucher, date, sender, item..."
+        partyColumnHeader="From Whom Received"
+        partyField="from_whom"
+        onPartyClick={(party) => {
+          setSearchQuery(party);
+          setCurrentPage(1);
+        }}
+        hasImageColumn={true}
+        onPreviewImage={(url) => setPreviewImage(url)}
+        onEdit={can('update_inventory') ? handleOpenEdit : null}
+        onDelete={can('delete_inventory') ? handleDelete : null}
+        emptyMessage="No received stock transactions found."
+      />
 
       {/* Bottom Back Button */}
       <BackButton to="/transactions" id="btn-back-transactions" />
-
-      {/* Floating "Add" Button (Bottom-Right, with "+" icon per requirement 3) */}
-      {canWrite && (
-        <button
-          id="btn-add-received-record"
-          onClick={handleOpenAdd}
-          className="fixed bottom-6 right-6 z-40 bg-ink hover:bg-[#193254] text-white px-5 py-2.5 rounded-full shadow-lg font-semibold text-xs transition-all hover:scale-105 active:scale-95 border border-white/10 flex items-center gap-1.5"
-          title="Add Received Record"
-        >
-          <Plus className="w-4 h-4 text-signal" />
-          <span>Add</span>
-        </button>
-      )}
 
       {/* "Add Received Record" / "Edit Received Record" Modal */}
       <RecordModal
@@ -923,14 +774,24 @@ export const ReceivedTransactions = () => {
               />
             </div>
 
-            {/* Date (date picker, optional) */}
+            {/* Date (date picker, required) */}
             <div>
-              <label className="block font-medium text-ink mb-1">
-                Date <span className="text-slate text-[11px] font-normal">(Optional)</span>
+              <label htmlFor="input-received-date" className="block font-medium text-ink mb-1">
+                Date <span className="text-signal">*</span>
               </label>
               <DateInput
+                id="input-received-date"
                 value={formData.date || ''}
-                onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.date)}
+                aria-describedby={fieldErrors.date ? "error-received-date" : undefined}
+                onChange={(e) => {
+                  setFormData(p => ({ ...p, date: e.target.value }));
+                  if (e.target.value) clearFieldError('date');
+                }}
+                onBlur={() => handleFieldBlur('date')}
+                error={fieldErrors.date}
                 placeholder="dd/mm/yyyy"
               />
             </div>
@@ -953,30 +814,58 @@ export const ReceivedTransactions = () => {
 
             {/* Qty (numeric input, default 1) */}
             <div>
-              <label className="block font-medium text-ink mb-1">Qty</label>
+              <label htmlFor="input-modal-quantity" className="block font-medium text-ink mb-1">Qty</label>
               <input
+                id="input-modal-quantity"
                 type="number"
                 min="1"
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.quantity)}
+                aria-describedby={fieldErrors.quantity ? "error-received-quantity" : undefined}
                 value={formData.quantity}
-                onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
-                className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink font-mono"
+                onChange={(e) => {
+                  setFormData(p => ({ ...p, quantity: e.target.value }));
+                  if (Number(e.target.value) >= 1) clearFieldError('quantity');
+                }}
+                onBlur={() => handleFieldBlur('quantity')}
+                className={`w-full px-3 py-2 bg-card border rounded focus:outline-none text-ink font-mono transition-colors ${
+                  fieldErrors.quantity
+                    ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
+                    : 'border-line focus:border-signal'
+                }`}
               />
+              {fieldErrors.quantity && (
+                <p id="error-received-quantity" className="mt-1 text-[12px] text-[#dc2626] font-medium leading-tight">
+                  {fieldErrors.quantity}
+                </p>
+              )}
             </div>
           </div>
 
           {/* Item Category (Dropdown positioned right above Item) */}
           <div>
-            <label className="block font-medium text-ink mb-1">
+            <label htmlFor="select-modal-item-category" className="block font-medium text-ink mb-1">
               Item Category <span className="text-signal">*</span>
             </label>
             <div className="relative">
               <select
                 id="select-modal-item-category"
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.category_id)}
+                aria-describedby={fieldErrors.category_id ? "error-received-category" : undefined}
                 value={formData.category_id || ''}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink text-xs appearance-none pr-8 cursor-pointer hover:border-slate/50 transition-colors"
+                onChange={(e) => {
+                  handleCategoryChange(e.target.value);
+                  if (e.target.value) clearFieldError('category_id');
+                }}
+                onBlur={() => handleFieldBlur('category_id')}
+                className={`w-full px-3 py-2 bg-card border rounded focus:outline-none text-ink text-xs appearance-none pr-8 cursor-pointer transition-colors ${
+                  fieldErrors.category_id
+                    ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
+                    : 'border-line hover:border-slate/50 focus:border-signal'
+                }`}
               >
                 <option value="">Select Item Category...</option>
                 {categories.map((cat) => (
@@ -987,17 +876,26 @@ export const ReceivedTransactions = () => {
               </select>
               <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
             </div>
+            {fieldErrors.category_id && (
+              <p id="error-received-category" className="mt-1 text-[12px] text-[#dc2626] font-medium leading-tight">
+                {fieldErrors.category_id}
+              </p>
+            )}
           </div>
 
           {/* Item (Dependent dropdown filtered by selected Item Category) */}
           <div className="relative" ref={itemDropdownRef}>
-            <label className="block font-medium text-ink mb-1">
+            <label htmlFor="input-modal-item-name" className="block font-medium text-ink mb-1">
               Item <span className="text-signal">*</span>
             </label>
             <div className="relative">
               <input
+                id="input-modal-item-name"
                 type="text"
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.item_name)}
+                aria-describedby={fieldErrors.item_name ? "error-received-item" : undefined}
                 disabled={!formData.category_id || itemsLoading}
                 placeholder={
                   !formData.category_id
@@ -1011,18 +909,24 @@ export const ReceivedTransactions = () => {
                   setItemSearchText(e.target.value);
                   setFormData(p => ({ ...p, item_name: e.target.value }));
                   setIsItemDropdownOpen(true);
+                  if (e.target.value.trim()) clearFieldError('item_name');
                 }}
                 onFocus={() => {
                   if (formData.category_id && !itemsLoading) {
                     setIsItemDropdownOpen(true);
                   }
                 }}
+                onBlur={() => handleFieldBlur('item_name')}
                 onClick={() => {
                   if (formData.category_id && !itemsLoading) {
                     setIsItemDropdownOpen(true);
                   }
                 }}
-                className={`w-full px-3 py-2 pr-8 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink placeholder-slate/60 text-xs transition-colors ${
+                className={`w-full px-3 py-2 pr-8 bg-card border rounded focus:outline-none text-ink placeholder-slate/60 text-xs transition-colors ${
+                  fieldErrors.item_name
+                    ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
+                    : 'border-line hover:border-slate/50 focus:border-signal'
+                } ${
                   !formData.category_id
                     ? 'opacity-60 cursor-not-allowed bg-surface/50'
                     : 'cursor-pointer hover:border-slate/50'
@@ -1073,6 +977,7 @@ export const ReceivedTransactions = () => {
                                 }));
                                 setItemSearchText(itemName);
                                 setIsItemDropdownOpen(false);
+                                clearFieldError('item_name');
                               }}
                               className={`px-3 py-1.5 text-xs cursor-pointer transition-colors flex items-center justify-between ${
                                 isSelected ? 'bg-signal/10 text-signal font-semibold' : 'text-ink hover:bg-surface'
@@ -1095,17 +1000,18 @@ export const ReceivedTransactions = () => {
                 </div>
               )}
             </div>
+            {fieldErrors.item_name && (
+              <p id="error-received-item" className="mt-1 text-[12px] text-[#dc2626] font-medium leading-tight">
+                {fieldErrors.item_name}
+              </p>
+            )}
           </div>
 
-          {/* From Whom Received (Typeable / Searchable Combobox per requirement 1) */}
+          {/* From Whom Received (Typeable / Searchable Combobox) */}
           <div className="relative" ref={senderDropdownRef}>
             <div className="flex items-center justify-between mb-1">
-              <label className="block font-medium text-ink">
-                From Whom Received {isSenderRequired ? (
-                  <span className="text-signal">*</span>
-                ) : (
-                  <span className="text-slate text-[11px] font-normal">(Optional)</span>
-                )}
+              <label htmlFor={isCustomSender ? "input-modal-custom-sender" : "input-modal-search-sender"} className="block font-medium text-ink">
+                From Whom Received <span className="text-signal">*</span>
               </label>
               {isCustomSender && (
                 <button
@@ -1123,30 +1029,50 @@ export const ReceivedTransactions = () => {
 
             {isCustomSender ? (
               <input
+                id="input-modal-custom-sender"
                 type="text"
-                required={isSenderRequired}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.from_whom)}
+                aria-describedby={fieldErrors.from_whom ? "error-received-from-whom" : undefined}
                 placeholder="Enter custom sender / supplier name..."
                 value={formData.from_whom}
                 onChange={(e) => {
                   setFormData(p => ({ ...p, from_whom: e.target.value }));
                   setSenderSearchText(e.target.value);
+                  if (e.target.value.trim()) clearFieldError('from_whom');
                 }}
-                className="w-full px-3 py-2 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink text-xs"
+                onBlur={() => handleFieldBlur('from_whom')}
+                className={`w-full px-3 py-2 bg-card border rounded focus:outline-none text-ink text-xs transition-colors ${
+                  fieldErrors.from_whom
+                    ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
+                    : 'border-line focus:border-signal'
+                }`}
               />
             ) : (
               <div className="relative">
                 <input
+                  id="input-modal-search-sender"
                   type="text"
-                  required={isSenderRequired}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(fieldErrors.from_whom)}
+                  aria-describedby={fieldErrors.from_whom ? "error-received-from-whom" : undefined}
                   placeholder="Type to search sender (e.g. Finco, Depot)..."
                   value={senderSearchText}
                   onChange={(e) => {
                     setSenderSearchText(e.target.value);
                     setFormData(p => ({ ...p, from_whom: e.target.value }));
                     setIsSenderDropdownOpen(true);
+                    if (e.target.value.trim()) clearFieldError('from_whom');
                   }}
                   onFocus={() => setIsSenderDropdownOpen(true)}
-                  className="w-full px-3 py-2 pr-8 bg-card border border-line rounded focus:outline-none focus:border-signal text-ink placeholder-slate/60 text-xs"
+                  onBlur={() => handleFieldBlur('from_whom')}
+                  className={`w-full px-3 py-2 pr-8 bg-card border rounded focus:outline-none text-ink placeholder-slate/60 text-xs transition-colors ${
+                    fieldErrors.from_whom
+                      ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
+                      : 'border-line hover:border-slate/50 focus:border-signal'
+                  }`}
                 />
                 <button
                   type="button"
@@ -1170,6 +1096,7 @@ export const ReceivedTransactions = () => {
                               setFormData(p => ({ ...p, from_whom: sender }));
                               setSenderSearchText(sender);
                               setIsSenderDropdownOpen(false);
+                              clearFieldError('from_whom');
                             }}
                             className={`px-3 py-2 text-xs cursor-pointer transition-colors flex items-center justify-between ${
                               isSelected ? 'bg-signal/10 text-signal font-semibold' : 'text-ink hover:bg-surface'
@@ -1195,6 +1122,7 @@ export const ReceivedTransactions = () => {
                           setIsSenderDropdownOpen(false);
                           if (senderSearchText.trim()) {
                             setFormData(p => ({ ...p, from_whom: senderSearchText.trim() }));
+                            clearFieldError('from_whom');
                           }
                         }}
                         className="w-full text-left px-3 py-2 text-xs font-semibold text-signal hover:bg-card rounded transition-colors flex items-center gap-1.5"
@@ -1206,6 +1134,11 @@ export const ReceivedTransactions = () => {
                   </div>
                 )}
               </div>
+            )}
+            {fieldErrors.from_whom && (
+              <p id="error-received-from-whom" className="mt-1 text-[12px] text-[#dc2626] font-medium leading-tight">
+                {fieldErrors.from_whom}
+              </p>
             )}
           </div>
 
@@ -1223,66 +1156,43 @@ export const ReceivedTransactions = () => {
             />
           </div>
 
-          {/* Attachment / Photo (dashed-border drop zone) */}
-          <div>
-            <label className="block font-medium text-ink mb-1">
-              Attachment / Photo <span className="text-slate text-[11px] font-normal">(Optional)</span>
-            </label>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-line hover:border-signal rounded-xl p-5 text-center cursor-pointer bg-surface/30 hover:bg-surface/60 transition-colors"
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/jpg"
-                className="hidden"
-                onChange={handleFileSelect}
-              />
-              {selectedFile ? (
-                <div className="flex items-center justify-center gap-3">
-                  <ImageIcon className="w-5 h-5 text-signal" />
-                  <span className="font-medium text-ink truncate max-w-xs">{selectedFile.name}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedFile(null);
-                    }}
-                    className="p-1 rounded hover:bg-[#B4483A]/10 text-slate hover:text-[#B4483A]"
-                    title="Remove attached file"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : formData.voucher_url ? (
-                <div className="flex items-center justify-center gap-3">
-                  <img
-                    src={formData.voucher_url}
-                    alt="Attached Voucher"
-                    className="w-10 h-10 object-cover rounded border border-line"
-                  />
-                  <div className="text-left">
-                    <div className="text-ink font-medium">Image attached</div>
-                    <div className="text-[11px] text-slate">Click to choose a replacement image</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-1.5 text-slate">
-                  <UploadCloud className="w-7 h-7 text-slate/60 mb-0.5" />
-                  <span className="font-medium text-ink text-xs">Click to upload photo or voucher image</span>
-                  <span className="text-[11px] text-slate/70">JPG, PNG, WebP up to 15MB</span>
-                </div>
-              )}
-            </div>
-          </div>
+          {/* Attachment / Photo */}
+          <FileUploadBox
+            file={selectedFile}
+            onFileChange={setSelectedFile}
+            existingUrl={formData.voucher_url}
+            label="Attachment / Photo (Optional)"
+            helperText="JPG, PNG, WebP up to 800KB"
+          />
         </div>
       </RecordModal>
 
       {/* Info Details Modal (for ⓘ icon) */}
-      {detailModalItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in">
-          <div className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md p-6 space-y-4 text-xs animate-scale-up">
+      {detailModalItem && createPortal(
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/60 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            detailBackdropRef.current = (e.target === e.currentTarget);
+          }}
+          onMouseUp={(e) => {
+            if (e.target !== e.currentTarget) {
+              detailBackdropRef.current = false;
+            }
+          }}
+          onClick={(e) => {
+            if (detailBackdropRef.current && e.target === e.currentTarget) {
+              setDetailModalItem(null);
+            }
+            detailBackdropRef.current = false;
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] overflow-y-auto p-6 space-y-4 text-xs m-auto shrink-0 animate-scale-up"
+          >
             <div className="flex items-center justify-between border-b border-line pb-3">
               <div className="flex items-center gap-2">
                 <Info className="w-4 h-4 text-signal" />
@@ -1290,12 +1200,13 @@ export const ReceivedTransactions = () => {
                   Transaction Details {detailModalItem.voucher_no?.trim() ? `(${detailModalItem.voucher_no})` : ''}
                 </h3>
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
                 onClick={() => setDetailModalItem(null)}
-                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                aria-label="Close details"
+              />
             </div>
 
             <div className="space-y-2.5">
@@ -1344,49 +1255,67 @@ export const ReceivedTransactions = () => {
 
             {detailModalItem.voucher_url && (
               <div className="pt-2">
-                <button
-                  type="button"
+                <Button
+                  size="regular"
+                  variant="secondary"
+                  icon={Eye}
+                  label="Preview Attached Voucher Image"
                   onClick={() => {
                     setPreviewImage(detailModalItem.voucher_url);
                   }}
-                  className="w-full py-2 bg-surface hover:bg-card border border-line text-ink rounded font-medium transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Eye className="w-3.5 h-3.5 text-signal" />
-                  <span>Preview Attached Voucher Image</span>
-                </button>
+                  className="w-full"
+                />
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Image Preview / Lightbox Modal */}
-      {previewImage && (
+      {previewImage && createPortal(
         <div
-          onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/75 backdrop-blur-xs animate-fade-in"
+          onMouseDown={(e) => {
+            previewBackdropRef.current = (e.target === e.currentTarget);
+          }}
+          onMouseUp={(e) => {
+            if (e.target !== e.currentTarget) {
+              previewBackdropRef.current = false;
+            }
+          }}
+          onClick={(e) => {
+            if (previewBackdropRef.current && e.target === e.currentTarget) {
+              setPreviewImage(null);
+            }
+            previewBackdropRef.current = false;
+          }}
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/75 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+          role="dialog"
+          aria-modal="true"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-card rounded-xl border border-line shadow-modal max-w-2xl w-full p-4 space-y-3 animate-scale-up"
+            onMouseDown={(e) => e.stopPropagation()}
+            className="bg-card rounded-xl border border-line shadow-modal max-w-2xl w-full max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] p-4 space-y-3 m-auto shrink-0 flex flex-col overflow-hidden animate-scale-up"
           >
-            <div className="flex items-center justify-between border-b border-line pb-2">
+            <div className="flex items-center justify-between border-b border-line pb-2 shrink-0">
               <span className="text-xs font-semibold text-ink">Voucher / Document Image</span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
                 onClick={() => setPreviewImage(null)}
-                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                aria-label="Close image preview"
+              />
             </div>
-            <div className="flex items-center justify-center max-h-[70vh] overflow-hidden rounded bg-surface">
+            <div className="flex items-center justify-center flex-1 min-h-0 overflow-hidden rounded bg-surface">
               <img
                 src={previewImage}
                 alt="Voucher Attachment"
-                className="max-h-[68vh] max-w-full object-contain rounded"
+                className="max-h-[calc(100vh-140px)] max-w-full object-contain rounded"
               />
             </div>
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end pt-2 shrink-0">
               <a
                 href={previewImage}
                 target="_blank"
@@ -1398,7 +1327,8 @@ export const ReceivedTransactions = () => {
               </a>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </AppShell>
   );

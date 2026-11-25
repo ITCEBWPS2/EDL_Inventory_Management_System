@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
+import { canManageCategoryTypes, can as checkCan } from '../utils/permissions';
 
 const AuthContext = createContext(null);
 
@@ -88,6 +89,9 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    try {
+      api.post('/auth/logout').catch(() => {});
+    } catch {}
     localStorage.removeItem('edl_token');
     localStorage.removeItem('edl_active_unit');
     setToken(null);
@@ -117,8 +121,22 @@ export const AuthProvider = ({ children }) => {
   const isUnitHead = user?.role === 'unit_head';
   const isEmployee = user?.role === 'employee';
 
-  const canWrite = isSuperAdmin || isLocalAdmin || isUnitHead || (isEmployee && user?.permission_level === 'read_write');
-  const canRead = isSuperAdmin || isLocalAdmin || isUnitHead || (isEmployee && user?.permission_level !== 'no_permission');
+  const can = useCallback((permissionKey) => {
+    return checkCan(permissionKey, user);
+  }, [user]);
+
+  const canViewInventory = can('view_inventory');
+  const canAddInventory = can('add_inventory');
+  const canUpdateInventory = can('update_inventory');
+  const canDeleteInventory = can('delete_inventory');
+  const canViewReports = can('view_reports');
+  const canManagePermissions = can('manage_permissions');
+
+  const canWrite = canAddInventory || canUpdateInventory;
+  const canRead = canViewInventory;
+  const canManageTypes = canManageCategoryTypes(user);
+  const canAddItemTypes = canManageCategoryTypes(user);
+  const canManageCategories = canManageCategoryTypes(user);
 
   // Resolve selectedUnit from systemUnits first (system-wide), then user's assigned units
   const selectedUnit = systemUnits.find(u => u.id === selectedUnitId) || user?.units?.find(u => u.id === selectedUnitId) || null;
@@ -141,8 +159,19 @@ export const AuthProvider = ({ children }) => {
         isLocalAdmin,
         isUnitHead,
         isEmployee,
+        can,
+        canViewInventory,
+        canAddInventory,
+        canUpdateInventory,
+        canDeleteInventory,
+        canViewReports,
+        canManagePermissions,
         canWrite,
-        canRead
+        canRead,
+        canManageTypes,
+        canAddItemTypes,
+        canManageCategories,
+        canManageCategoryTypes: () => canManageCategoryTypes(user)
       }}
     >
       {children}
@@ -156,4 +185,28 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+};
+
+export const usePermissions = () => {
+  const {
+    can,
+    canViewInventory,
+    canAddInventory,
+    canUpdateInventory,
+    canDeleteInventory,
+    canViewReports,
+    canManagePermissions,
+    user
+  } = useAuth();
+
+  return {
+    can,
+    canViewInventory,
+    canAddInventory,
+    canUpdateInventory,
+    canDeleteInventory,
+    canViewReports,
+    canManagePermissions,
+    user
+  };
 };

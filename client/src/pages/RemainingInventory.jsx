@@ -4,10 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { DataTable } from '../components/common/DataTable';
-import { KpiCard } from '../components/dashboard/KpiCard';
+import { StatCard } from '../components/common/StatCard';
 import { BackButton } from '../components/common/BackButton';
+import { ExportButton } from '../components/ui/ExportButton';
 import { formatNumber, exportToCSV } from '../utils/formatters';
-import { Download, Calculator, Lock } from 'lucide-react';
+import { Calculator } from 'lucide-react';
 
 export const RemainingInventory = () => {
   const { selectedUnitId, selectedUnit } = useAuth();
@@ -49,8 +50,8 @@ export const RemainingInventory = () => {
           if (catalogMap.has(idKey)) {
             return catalogMap.get(idKey);
           }
-          if (!tx.item_id.match(/^[0-9a-f-]{36}$/i)) {
-            return tx.item_id.trim();
+          if (!String(tx.item_id).match(/^[0-9a-f-]{36}$/i)) {
+            return String(tx.item_id).trim();
           }
         }
         if (tx.item_id && (!name || name === 'Unknown Item')) {
@@ -165,11 +166,15 @@ export const RemainingInventory = () => {
     {
       header: 'No.',
       accessor: 'index',
+      width: 56,
+      minWidth: 56,
       render: (row, idx) => <span className="font-mono text-slate text-xs">{idx + 1}</span>
     },
     {
       header: 'Item',
       accessor: 'item_name',
+      width: 260,
+      minWidth: 220,
       render: (row) => (
         <span className="font-medium text-ink text-xs">{row.item_name}</span>
       )
@@ -179,6 +184,8 @@ export const RemainingInventory = () => {
       accessor: 'total_received',
       tabular: true,
       align: 'right',
+      width: 130,
+      minWidth: 120,
       render: (row) => (
         <span className="font-medium text-ink tabular-nums text-xs">
           {formatNumber(row.total_received)}
@@ -190,6 +197,8 @@ export const RemainingInventory = () => {
       accessor: 'total_expended',
       tabular: true,
       align: 'right',
+      width: 130,
+      minWidth: 120,
       render: (row) => (
         <span className="font-medium text-ink tabular-nums text-xs">
           {formatNumber(row.total_expended)}
@@ -201,6 +210,8 @@ export const RemainingInventory = () => {
       accessor: 'remaining_qty',
       tabular: true,
       align: 'right',
+      width: 150,
+      minWidth: 140,
       render: (row) => {
         const qty = Number(row.remaining_qty || 0);
         const isPositive = qty > 0;
@@ -228,22 +239,14 @@ export const RemainingInventory = () => {
     <AppShell breadcrumbs={[{ label: 'Transactions', path: '/transactions' }, { label: 'Remaining' }]}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-ink tracking-tight">Remaining Inventory Balance</h1>
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-surface border border-line text-slate">
-              <Lock className="w-3 h-3 text-signal" />
-              <span>System Derived</span>
-            </span>
-          </div>
+          <h1 className="text-xl font-semibold text-ink tracking-tight">Remaining Inventory Balance</h1>
         </div>
 
-        <button
+        <ExportButton
           onClick={handleExport}
-          className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-semibold rounded transition-colors shadow-subtle flex items-center gap-1.5 shrink-0"
-        >
-          <Download className="w-3.5 h-3.5 text-signal" />
-          <span>Export CSV</span>
-        </button>
+          label="Export CSV"
+          title="Export remaining stock as CSV"
+        />
       </div>
 
       {/* Compliance Callout Note */}
@@ -265,26 +268,26 @@ export const RemainingInventory = () => {
 
       {/* 4 Summary Cards below the table */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-        <KpiCard
-          label="Total Items"
+        <StatCard
+          label="No of Item Types"
           value={summaryTotals.totalItems}
-          subtext="Unique items with received history"
+          loading={loading}
         />
-        <KpiCard
-          label="Total Received"
+        <StatCard
+          label="Total Received Quantity"
           value={summaryTotals.totalReceived}
-          subtext="Total cumulative received across all items"
+          loading={loading}
         />
-        <KpiCard
-          label="Total Expended"
+        <StatCard
+          label="Total Expended Quantity"
           value={summaryTotals.totalExpended}
-          subtext="Total cumulative expended across all items"
+          loading={loading}
         />
-        <KpiCard
-          label="Total Remaining"
+        <StatCard
+          label="Total Remaining Quantity"
           value={summaryTotals.totalRemaining}
-          subtext="Total cumulative net balance available"
           highlight={true}
+          loading={loading}
         />
       </div>
 

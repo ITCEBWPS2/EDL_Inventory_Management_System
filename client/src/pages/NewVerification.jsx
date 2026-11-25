@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -6,9 +7,20 @@ import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { BackButton } from '../components/common/BackButton';
 import { ConfirmModal } from '../components/common/ConfirmModal';
+import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { DateInput } from '../components/common/DateInput';
 import { SerialNumberCell } from '../components/verification/SerialNumberCell';
 import { formatDate } from '../utils/formatters';
+import { PrintHeader } from '../components/common/PrintHeader';
+import { ExportButton } from '../components/ui/ExportButton';
+import { Button } from '../components/common/Button';
+import {
+  isTestToolsAllowed,
+  hasTestGeneratedData,
+  countTestGeneratedRows,
+  generateVerificationTestData,
+  clearTestGeneratedData
+} from '../utils/verificationTestHelper';
 import {
   MapPin,
   ClipboardCheck,
@@ -23,10 +35,11 @@ import {
   Search,
   Filter,
   Check,
-  ExternalLink
+  ExternalLink,
+  FlaskConical
 } from 'lucide-react';
 
-const CONDITION_OPTIONS = ['—', 'Good', 'Fair', 'Damaged', 'Obsolete', 'Needs Repair'];
+const CONDITION_OPTIONS = ['—', 'Good', 'Damaged'];
 const ISSUED_DESTROYED_OPTIONS = ['—', 'Issued', 'Destroyed', 'N/A'];
 
 // Format ISO date-time into DD/MM/YYYY HH:mm
@@ -112,12 +125,18 @@ const VerificationRow = memo(({
   return (
     <tr className="hover:bg-surface/50 transition-colors group">
       {/* 1. No (Plain table cell) */}
-      <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] border-r border-line/60">
+      <td
+        className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] max-w-[48px] border-r border-line/60"
+        style={{ width: '48px', minWidth: '48px', maxWidth: '48px', position: 'static' }}
+      >
         {idx + 1}
       </td>
 
       {/* 2. Serial No. (Plain table cell, w-[420px] min-w-[400px], single line per serial, collapse for batches) */}
-      <td className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line/60">
+      <td
+        className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line/60"
+        style={{ width: '420px', minWidth: '400px', position: 'static' }}
+      >
         <SerialNumberCell
           serialNumbers={row.serial_numbers}
           manufacturerSerialNumbers={row.manufacturer_serial_numbers}
@@ -368,8 +387,28 @@ export const NewVerification = () => {
   const [itemToRemove, setItemToRemove] = useState(null);
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [isCancelDraftModalOpen, setIsCancelDraftModalOpen] = useState(false);
+  const cancelDraftBackdropRef = useRef(false);
   const [isUnsavedLeaveModalOpen, setIsUnsavedLeaveModalOpen] = useState(false);
   const [issuedDestroyedRecords, setIssuedDestroyedRecords] = useState([]);
+
+  // Testing Helper State (Dev / Super & Local Admin only)
+  const isDevTestingAllowed = useMemo(() => isTestToolsAllowed(user), [user]);
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+  const testModalBackdropRef = useRef(false);
+  const [testScope, setTestScope] = useState('visible'); // 'visible' | 'all'
+  const [testOnlyEmpty, setTestOnlyEmpty] = useState(true);
+  const [testPattern, setTestPattern] = useState('realistic'); // 'realistic' | 'all_matched' | 'shortages_excess'
+  const [testPercentage, setTestPercentage] = useState(100);
+  const [testFillHeaders, setTestFillHeaders] = useState(false);
+
+  // In-memory test tracking (no DB writes)
+  const [testDataBackup, setTestDataBackup] = useState(null); // backup of items before test fill
+  const [testGeneratedIndices, setTestGeneratedIndices] = useState(new Set());
+  const [testHeaderBackup, setTestHeaderBackup] = useState(null);
+
+  // Safety confirmation modal if submitting with test data
+  const [isTestDataSafetyModalOpen, setIsTestDataSafetyModalOpen] = useState(false);
+  const [pendingSubmitAction, setPendingSubmitAction] = useState(null);
 
   // Auto-sync year when date changes
   const handleDateChange = (e) => {
@@ -586,6 +625,121 @@ export const NewVerification = () => {
     setSelectedCategoryFilter('');
     loadInitialData();
   }, [editId, effectiveUnitId]);
+
+  // Reset table horizontal scroll strictly to left edge when page loads, step changes or filters change
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (el) {
+      el.scrollLeft = 0;
+      requestAnimationFrame(() => {
+        if (el) el.scrollLeft = 0;
+      });
+    }
+  }, [loading, currentStep, selectedCategoryFilter, searchQuery]);
+
+  // Check if test-generated data is active
+  const hasTestData = useMemo(() => {
+    return hasTestGeneratedData(items, testGeneratedIndices);
+  }, [items, testGeneratedIndices]);
+
+  const testFilledCount = useMemo(() => {
+    return countTestGeneratedRows(items, testGeneratedIndices);
+  }, [items, testGeneratedIndices]);
+
+  // Fill test data handler (in-memory only, no DB writes)
+  const handleFillTestData = () => {
+    const targetOriginalIndices = testScope === 'visible'
+      ? filteredItems.map(row => row.originalIndex)
+      : items.map((_, idx) => idx);
+
+    // Snapshot current state before applying test data (only if we don't already have one)
+    if (!testDataBackup) {
+      setTestDataBackup(items.map(it => ({ ...it })));
+    }
+
+    if (testFillHeaders) {
+      setTestHeaderBackup({
+        verifier1,
+        verifier2,
+        verifier3
+      });
+      setVerifier1('Test Verifier 1');
+      setVerifier2('Test Verifier 2');
+      setVerifier3('Test Verifier 3');
+      if (errors.verifier1) {
+        setErrors(prev => ({ ...prev, verifier1: null }));
+      }
+    }
+
+    const { updatedItems, modifiedIndices } = generateVerificationTestData({
+      items,
+      targetIndices: targetOriginalIndices,
+      pattern: testPattern,
+      onlyEmpty: testOnlyEmpty,
+      percentage: testPercentage,
+      startLabelSeq: 1
+    });
+
+    setTestGeneratedIndices(modifiedIndices);
+    setItems(updatedItems);
+    setIsTestModalOpen(false);
+    toast.info(`Filled test data into ${modifiedIndices.size} rows (in-memory only).`);
+  };
+
+  // Clear test data handler
+  const handleClearTestData = async () => {
+    // 1. Restore/clear in-memory line items
+    const restoredItems = clearTestGeneratedData(items, testDataBackup, testGeneratedIndices);
+    setItems(restoredItems);
+
+    // 2. Clean savedSnapshots of any test items so they don't show as dirty or get re-saved
+    setSavedSnapshots(prev => {
+      const updated = { ...prev };
+      items.forEach(it => {
+        const itemId = it.inventory_item_id || it.item_id || it.id;
+        const snap = updated[itemId];
+        const isTest = it.__isTestGenerated ||
+          String(it.label_no || '').trim().startsWith('TEST-') ||
+          (snap && String(snap.label_no || '').trim().startsWith('TEST-'));
+        if (isTest && itemId) {
+          delete updated[itemId];
+        }
+      });
+      return updated;
+    });
+
+    // 3. Clear verifiers if they were test verifiers
+    if (verifier1?.startsWith('Test Verifier') || verifier1 === 'Test Verifier 1') {
+      setVerifier1(testHeaderBackup?.verifier1 || '');
+    }
+    if (verifier2?.startsWith('Test Verifier') || verifier2 === 'Test Verifier 2') {
+      setVerifier2(testHeaderBackup?.verifier2 || '');
+    }
+    if (verifier3?.startsWith('Test Verifier') || verifier3 === 'Test Verifier 3') {
+      setVerifier3(testHeaderBackup?.verifier3 || '');
+    }
+    setTestHeaderBackup(null);
+
+    setTestGeneratedIndices(new Set());
+    setTestDataBackup(null);
+
+    // 4. If an active draft on the backend has test items, clear them from the server draft as well
+    if (draftInfo?.id) {
+      try {
+        const res = await api.delete('/verifications/draft/test-items', { unit_id: effectiveUnitId }).catch(() => null);
+        if (res?.success) {
+          setDraftInfo(prev => prev ? {
+            ...prev,
+            savedCount: res.remainingCount !== undefined ? res.remainingCount : prev.savedCount
+          } : null);
+        }
+      } catch (err) {
+        console.warn('Could not clear test items from backend draft:', err);
+      }
+    }
+
+    toast.info('Test data cleared.');
+  };
 
   // Distinct categories for filter dropdown
   const distinctCategories = useMemo(() => {
@@ -901,6 +1055,8 @@ export const NewVerification = () => {
         toast.success('Draft verification discarded.');
         setDraftInfo(null);
         setSavedSnapshots({});
+        setTestDataBackup(null);
+        setTestGeneratedIndices(new Set());
         setIsDiscardModalOpen(false);
         await loadInitialData();
       }
@@ -973,13 +1129,29 @@ export const NewVerification = () => {
       return;
     }
 
-    setErrors({});
-    setCurrentStep(2);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const proceedToReview = () => {
+      setErrors({});
+      setCurrentStep(2);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    if (hasTestData) {
+      setPendingSubmitAction(() => proceedToReview);
+      setIsTestDataSafetyModalOpen(true);
+      return;
+    }
+
+    proceedToReview();
   };
 
   // Step 2 Confirm Verification and save to database permanently
-  const handleConfirmVerification = async () => {
+  const handleConfirmVerification = async (forceBypassSafety = false) => {
+    if (!forceBypassSafety && hasTestData) {
+      setPendingSubmitAction(() => () => handleConfirmVerification(true));
+      setIsTestDataSafetyModalOpen(true);
+      return;
+    }
+
     if (isExistingConfirmed) {
       navigate('/verification/history');
       return;
@@ -1067,45 +1239,14 @@ export const NewVerification = () => {
         { label: 'New Verification' }
       ]}
     >
-      {/* Printable Report Header (Visible ONLY when printing landscape) */}
-      <div className="hidden print:block mb-6">
-        <div className="border-b-2 border-ink pb-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-xl font-bold text-ink uppercase tracking-wide">
-                Electricity Distribution Lanka (Pvt) Ltd
-              </h1>
-              <p className="text-sm font-semibold text-slate mt-0.5">
-                Annual Board of Survey — Physical Inventory Verification Report
-              </p>
-            </div>
-            <div className="text-right text-xs font-mono text-slate">
-              <div>EDL-IMS AUDIT FORM 04-B</div>
-              <div>Cycle Year: {year}</div>
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-4 mt-4 text-xs">
-            <div>
-              <span className="font-bold text-slate uppercase block">Location</span>
-              <span className="font-semibold text-ink">{locationDisplay}</span>
-            </div>
-            <div>
-              <span className="font-bold text-slate uppercase block">Verification Date</span>
-              <span className="font-semibold text-ink">{formatDate(date)}</span>
-            </div>
-            <div>
-              <span className="font-bold text-slate uppercase block">Audit Year</span>
-              <span className="font-semibold text-ink">{year}</span>
-            </div>
-            <div>
-              <span className="font-bold text-slate uppercase block">Verified By</span>
-              <span className="font-semibold text-ink">
-                {[verifier1, verifier2, verifier3].filter(Boolean).join(', ') || '—'}
-              </span>
-            </div>
-          </div>
+      <div className="print-landscape">
+        {/* Printable Report Header */}
+        <div className="hidden print:block mb-4">
+          <PrintHeader
+            reportTitle="Physical Inventory Verification Report"
+            subtitle="Annual Board of Survey"
+          />
         </div>
-      </div>
 
       {/* Main Page Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3.5 no-print">
@@ -1129,18 +1270,28 @@ export const NewVerification = () => {
               <span className="text-slate">. <strong className="text-ink">{savedItemsCount}</strong> of <strong className="text-ink">{items.length}</strong> items saved.</span>
             </div>
           </div>
-          <button
-            type="button"
+          <Button
+            size="small"
+            variant="danger-soft"
+            icon={Trash2}
+            label="Discard draft"
             onClick={() => setIsDiscardModalOpen(true)}
             disabled={isReadOnly}
-            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-[#B4483A] bg-[#B4483A]/10 hover:bg-[#B4483A]/15 border border-[#B4483A]/20 rounded-lg transition-colors cursor-pointer self-start sm:self-auto shrink-0 disabled:opacity-50"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Discard draft</span>
-          </button>
+            className="self-start sm:self-auto shrink-0"
+          />
         </div>
       )}
 
+      {/* Step View Boundary: Automatically resets on step switch and keeps form data intact */}
+      <ErrorBoundary
+        level="page"
+        resetKey={`step-${currentStep}`}
+        title="Verification View Interrupted"
+        onReset={() => {
+          setCurrentStep(1);
+          toast.info('Your entries were kept.');
+        }}
+      >
       {/* ========================================================================= */}
       {/* STEP 1: VERIFICATION ENTRY FORM                                           */}
       {/* ========================================================================= */}
@@ -1312,6 +1463,31 @@ export const NewVerification = () => {
                     <span>Reset</span>
                   </button>
                 )}
+
+                {/* Testing Helper (Dev / Super Admin & Local Admin only) */}
+                {isDevTestingAllowed && !isReadOnly && (
+                  <div className="flex items-center gap-2 border-l border-line/70 pl-2.5 ml-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsTestModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                      title="Fill sample test data in-memory"
+                    >
+                      <FlaskConical className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Fill test data</span>
+                    </button>
+                    {hasTestData && (
+                      <button
+                        type="button"
+                        onClick={handleClearTestData}
+                        className="text-xs text-amber-800/90 hover:text-amber-950 hover:underline px-1 py-1 font-medium cursor-pointer"
+                        title="Clear helper-generated test data"
+                      >
+                        Clear test data
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Items Counter + "Save all" Button */}
@@ -1351,33 +1527,63 @@ export const NewVerification = () => {
             </div>
           )}
 
-          {/* Verification Table with Sticky No & Serial No Columns & Contained Scroll */}
+          {/* Test Data Active Banner */}
+          {hasTestData && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-900 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs animate-fade-in no-print">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
+                  <FlaskConical className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-semibold text-amber-950">Test data filled ({testFilledCount} rows).</span>
+                  <span className="text-amber-800 ml-1.5">Nothing has been saved or submitted.</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={handleClearTestData}
+                  className="px-3 py-1 text-xs font-semibold text-amber-800 hover:text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors cursor-pointer"
+                >
+                  Clear test data
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Verification Table with Sticky Header & Contained Scroll */}
           <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
             <div
               ref={tableContainerRef}
               className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto"
             >
               <table className="w-full min-w-[1550px] text-left text-xs text-ink border-collapse table-auto">
-                <thead className="sticky top-0 z-30 bg-surface border-b border-line shadow-xs">
-                  <tr className="bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
+                <thead className="sticky top-0 z-30 bg-white border-b border-line shadow-xs">
+                  <tr className="bg-white font-semibold text-slate uppercase tracking-wider text-[11px]">
                     {/* Column 1: No (Plain table cell) */}
-                    <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60">
-                      No
+                    <th
+                      className="w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60"
+                      style={{ backgroundColor: '#ffffff', width: '48px', minWidth: '48px', maxWidth: '48px', position: 'static', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}
+                    >
+                      No.
                     </th>
                     {/* Column 2: Serial No (Plain table cell, w-[420px] min-w-[400px]) */}
-                    <th className="py-2.5 px-3 w-[420px] min-w-[400px] border-r border-line">
+                    <th
+                      className="w-[420px] min-w-[400px] border-r border-line text-left"
+                      style={{ backgroundColor: '#ffffff', width: '420px', minWidth: '400px', position: 'static', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}
+                    >
                       Serial No.
                     </th>
-                    <th className="py-2.5 px-4 min-w-[170px]">Item</th>
-                    <th className="py-2.5 px-3 min-w-[130px]">Category</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">System Qty</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[85px]">Physical Qty</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">Difference</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[105px]">Condition</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[210px] w-[220px]">Issued / Destroyed</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[95px]">Label No</th>
-                    <th className="py-2.5 px-4 min-w-[140px]">Remarks</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[120px]">Actions</th>
+                    <th className="min-w-[170px] text-left" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Item</th>
+                    <th className="min-w-[130px] text-left" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Category</th>
+                    <th className="text-center min-w-[90px]" title="System Qty" aria-label="System Qty" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>System<br />Qty</th>
+                    <th className="text-center min-w-[90px]" title="Physical Qty" aria-label="Physical Qty" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Physical<br />Qty</th>
+                    <th className="text-center min-w-[85px]" title="Difference" aria-label="Difference" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Difference</th>
+                    <th className="text-center min-w-[105px]" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
+                    <th className="text-center min-w-[140px] w-[140px]" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
+                    <th className="text-center min-w-[110px]" title="Label No" aria-label="Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No</th>
+                    <th className="text-left min-w-[140px]" title="Remarks" aria-label="Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Remarks</th>
+                    <th className="text-center min-w-[110px]" title="Actions" aria-label="Actions" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
@@ -1437,22 +1643,20 @@ export const NewVerification = () => {
 
           {/* Bottom Action Bar (Step 1) - Sticky */}
           <div className="sticky bottom-0 z-20 bg-background/95 backdrop-blur-sm border-t border-line py-2.5 px-4 -mx-4 sm:-mx-6 sm:px-6 flex items-center justify-between shadow-[0_-4px_12px_rgba(0,0,0,0.06)] no-print">
-            <button
-              type="button"
+            <Button
+              size="regular"
+              variant="secondary"
+              label="Cancel"
               onClick={handleCancel}
-              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs cursor-pointer"
-            >
-              Cancel
-            </button>
+            />
 
-            <button
-              type="button"
+            <Button
+              size="regular"
+              variant="primary"
+              label="Submit"
+              iconRight={ChevronRight}
               onClick={handleSubmitToReview}
-              className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span>Submit</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            />
           </div>
         </div>
       )}
@@ -1543,24 +1747,39 @@ export const NewVerification = () => {
             </div>
           </div>
 
+          {/* Test Data Active Banner in Step 2 */}
+          {hasTestData && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-900 rounded-xl flex items-center justify-between text-xs animate-fade-in no-print">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
+                  <FlaskConical className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-semibold text-amber-950">Test data active ({testFilledCount} rows).</span>
+                  <span className="text-amber-800 ml-1.5">Reviewing sample test values. Nothing has been saved to the database.</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Read-Only Table */}
           <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
             <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto">
               <table className="w-full min-w-[1550px] text-left text-xs text-ink border-collapse table-auto">
-                <thead className="sticky top-0 z-30 bg-surface border-b border-line shadow-xs">
-                  <tr className="border-b border-line bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
-                    <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60">No</th>
-                    <th className="py-2.5 px-3 w-[420px] min-w-[400px] border-r border-line">Serial No.</th>
-                    <th className="py-2.5 px-4 min-w-[170px]">Item</th>
-                    <th className="py-2.5 px-3 min-w-[130px]">Category</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">System Qty</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[85px]">Physical Qty</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[75px]">Difference</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[105px]">Condition</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[210px] w-[220px]">Issued / Destroyed</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[95px]">Label No</th>
-                    <th className="py-2.5 px-4 min-w-[140px]">Remarks</th>
-                    <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[100px]">Status</th>
+                <thead className="sticky top-0 z-30 bg-white border-b border-line shadow-xs">
+                  <tr className="border-b border-line bg-white font-semibold text-slate uppercase tracking-wider text-[11px]">
+                    <th className="w-12 min-w-[48px] max-w-[48px] text-center border-r border-line/60" style={{ backgroundColor: '#ffffff', width: '48px', minWidth: '48px', maxWidth: '48px', position: 'static', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>No.</th>
+                    <th className="w-[420px] min-w-[400px] border-r border-line text-left" style={{ backgroundColor: '#ffffff', width: '420px', minWidth: '400px', position: 'static', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Serial No.</th>
+                    <th className="min-w-[170px] text-left" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Item</th>
+                    <th className="min-w-[130px] text-left" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Category</th>
+                    <th className="text-center min-w-[90px]" title="System Qty" aria-label="System Qty" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>System<br />Qty</th>
+                    <th className="text-center min-w-[90px]" title="Physical Qty" aria-label="Physical Qty" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Physical<br />Qty</th>
+                    <th className="text-center min-w-[85px]" title="Difference" aria-label="Difference" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Difference</th>
+                    <th className="text-center min-w-[105px]" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
+                    <th className="text-center min-w-[140px] w-[140px]" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
+                    <th className="text-center min-w-[110px]" title="Label No" aria-label="Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No</th>
+                    <th className="text-left min-w-[140px]" title="Remarks" aria-label="Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Remarks</th>
+                    <th className="text-center min-w-[100px]" title="Status" aria-label="Status" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
@@ -1572,12 +1791,12 @@ export const NewVerification = () => {
                     return (
                       <tr key={row.id || idx} className="hover:bg-surface/50 transition-colors group">
                         {/* 1. No */}
-                        <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] max-w-[48px] border-r border-line/60">
+                        <td className="py-2.5 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] max-w-[48px] border-r border-line/60" style={{ width: '48px', minWidth: '48px', maxWidth: '48px', position: 'static' }}>
                           {idx + 1}
                         </td>
 
                         {/* 2. Serial No. */}
-                        <td className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line">
+                        <td className="py-2.5 px-3 w-[420px] min-w-[400px] align-top border-r border-line" style={{ width: '420px', minWidth: '400px', position: 'static' }}>
                           <SerialNumberCell
                             serialNumbers={row.serial_numbers}
                             manufacturerSerialNumbers={row.manufacturer_serial_numbers}
@@ -1693,65 +1912,59 @@ export const NewVerification = () => {
 
           {/* Bottom Action Bar (Step 2) */}
           <div className="sticky bottom-0 z-20 bg-background/95 backdrop-blur-sm border-t border-line py-2.5 px-4 -mx-4 sm:-mx-6 sm:px-6 flex items-center justify-between shadow-[0_-4px_12px_rgba(0,0,0,0.06)] no-print">
-            <button
-              type="button"
+            <Button
+              size="regular"
+              variant="secondary"
+              label="Cancel"
               onClick={handleCancel}
-              className="px-4 py-2 border border-line rounded-lg text-xs font-semibold text-slate hover:text-ink hover:bg-surface transition-colors shadow-xs cursor-pointer"
-            >
-              Cancel
-            </button>
+            />
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               {/* Print Button */}
-              <button
-                type="button"
+              <ExportButton
+                format="print"
+                label="Print Report"
                 onClick={() => window.print()}
-                className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
                 title="Print Landscape Verification Document"
-              >
-                <Printer className="w-3.5 h-3.5 text-signal" />
-                <span>Print</span>
-              </button>
+              />
 
               {/* Update Button (Goes back to Step 1 with draft data intact) */}
               {!isExistingConfirmed && (
-                <button
-                  type="button"
+                <Button
+                  size="regular"
+                  variant="secondary"
+                  icon={Save}
+                  label="Update"
                   onClick={() => setCurrentStep(1)}
-                  className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-medium rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
                   title="Return to form to edit details"
-                >
-                  <Save className="w-3.5 h-3.5 text-signal" />
-                  <span>Update</span>
-                </button>
+                />
               )}
 
               {/* Confirm Button */}
               {!isExistingConfirmed && (
-                <button
-                  type="button"
+                <Button
+                  size="regular"
+                  variant="primary"
+                  label={submitting ? 'Confirming...' : 'Confirm'}
+                  iconRight={ChevronRight}
                   onClick={handleConfirmVerification}
                   disabled={submitting || isReadOnly}
-                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <span>{submitting ? 'Confirming...' : 'Confirm'}</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                />
               )}
 
               {isExistingConfirmed && (
-                <button
-                  type="button"
+                <Button
+                  size="regular"
+                  variant="primary"
+                  label="Return to History"
                   onClick={() => navigate('/verification/history')}
-                  className="px-5 py-2.5 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg shadow-subtle transition-all cursor-pointer"
-                >
-                  Return to History
-                </button>
+                />
               )}
             </div>
           </div>
         </div>
       )}
+      </ErrorBoundary>
 
       {/* Bottom Back Button */}
       <div className="no-print">
@@ -1788,14 +2001,30 @@ export const NewVerification = () => {
       />
 
       {/* Confirmation Dialog on Cancel with Active Draft */}
-      {isCancelDraftModalOpen && (
+      {isCancelDraftModalOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in"
-          onClick={() => setIsCancelDraftModalOpen(false)}
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/60 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            cancelDraftBackdropRef.current = (e.target === e.currentTarget);
+          }}
+          onMouseUp={(e) => {
+            if (e.target !== e.currentTarget) {
+              cancelDraftBackdropRef.current = false;
+            }
+          }}
+          onClick={(e) => {
+            if (cancelDraftBackdropRef.current && e.target === e.currentTarget) {
+              setIsCancelDraftModalOpen(false);
+            }
+            cancelDraftBackdropRef.current = false;
+          }}
         >
           <div
-            className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md overflow-hidden animate-scale-up"
+            className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] flex flex-col overflow-hidden m-auto shrink-0 animate-scale-up"
             onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-5 border-b border-line bg-surface/50">
               <div className="flex items-center gap-2.5">
@@ -1806,13 +2035,13 @@ export const NewVerification = () => {
                   Leave Verification?
                 </h2>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
                 onClick={() => setIsCancelDraftModalOpen(false)}
-                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                aria-label="Close dialog"
+              />
             </div>
 
             <div className="p-5 space-y-3 text-xs">
@@ -1822,15 +2051,16 @@ export const NewVerification = () => {
             </div>
 
             <div className="p-4 border-t border-line bg-surface/50 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
+              <Button
+                size="regular"
+                variant="secondary"
+                label="Continue Editing"
                 onClick={() => setIsCancelDraftModalOpen(false)}
-                className="px-3.5 py-2 text-xs font-medium text-slate hover:text-ink bg-card hover:bg-surface border border-line rounded-lg transition-colors cursor-pointer"
-              >
-                Continue Editing
-              </button>
-              <button
-                type="button"
+              />
+              <Button
+                size="regular"
+                variant="danger-solid"
+                label="Discard Draft & Exit"
                 onClick={async () => {
                   setIsCancelDraftModalOpen(false);
                   try {
@@ -1840,23 +2070,20 @@ export const NewVerification = () => {
                   }
                   navigate('/verification');
                 }}
-                className="px-3.5 py-2 text-xs font-medium text-white bg-[#B4483A] hover:bg-[#96382C] rounded-lg transition-colors shadow-subtle cursor-pointer"
-              >
-                Discard Draft &amp; Exit
-              </button>
-              <button
-                type="button"
+              />
+              <Button
+                size="regular"
+                variant="primary"
+                label="Keep Draft & Exit"
                 onClick={() => {
                   setIsCancelDraftModalOpen(false);
                   navigate('/verification');
                 }}
-                className="px-4 py-2 text-xs font-semibold text-white bg-signal hover:bg-[#1f406b] rounded-lg transition-colors shadow-subtle cursor-pointer"
-              >
-                Keep Draft &amp; Exit
-              </button>
+              />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Confirmation Dialog on Cancel with Unsaved Changes and No Draft */}
@@ -1873,6 +2100,201 @@ export const NewVerification = () => {
         cancelLabel="Stay on Page"
         isDestructive={true}
       />
+
+      {/* Safety Confirmation Dialog when Submitting Verification Containing Test Data */}
+      <ConfirmModal
+        isOpen={isTestDataSafetyModalOpen}
+        onClose={() => {
+          setIsTestDataSafetyModalOpen(false);
+          setPendingSubmitAction(null);
+        }}
+        onConfirm={() => {
+          setIsTestDataSafetyModalOpen(false);
+          if (pendingSubmitAction) {
+            const act = pendingSubmitAction;
+            setPendingSubmitAction(null);
+            act();
+          }
+        }}
+        title="Test Data Detected"
+        message="This verification contains test data (TEST-... labels). Submit anyway?"
+        confirmLabel="Submit Anyway"
+        cancelLabel="Cancel"
+        isDestructive={false}
+      />
+
+      {/* Test Data Options Modal */}
+      {isTestModalOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/60 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            testModalBackdropRef.current = (e.target === e.currentTarget);
+          }}
+          onMouseUp={(e) => {
+            if (e.target !== e.currentTarget) {
+              testModalBackdropRef.current = false;
+            }
+          }}
+          onClick={(e) => {
+            if (testModalBackdropRef.current && e.target === e.currentTarget) {
+              setIsTestModalOpen(false);
+            }
+            testModalBackdropRef.current = false;
+          }}
+        >
+          <div
+            className="bg-card rounded-xl border border-line shadow-modal w-full max-w-md max-h-[calc(100vh-32px)] flex flex-col overflow-hidden m-auto shrink-0 animate-scale-up text-ink"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-line bg-surface/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-500/15 text-amber-700">
+                  <FlaskConical className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Fill Test Data</h2>
+                  <p className="text-[11px] text-slate">In-memory verification helper (no database writes)</p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
+                onClick={() => setIsTestModalOpen(false)}
+                aria-label="Close dialog"
+              />
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs">
+              {/* Scope */}
+              <div>
+                <label className="block font-semibold text-slate uppercase text-[10px] tracking-wider mb-1.5">
+                  Target Rows Scope
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                    testScope === 'visible' ? 'border-signal bg-signal/5 text-ink font-semibold' : 'border-line text-slate hover:border-slate/40'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="test_scope"
+                      value="visible"
+                      checked={testScope === 'visible'}
+                      onChange={() => setTestScope('visible')}
+                      className="text-signal focus:ring-0"
+                    />
+                    <span>Visible ({filteredItems.length})</span>
+                  </label>
+                  <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                    testScope === 'all' ? 'border-signal bg-signal/5 text-ink font-semibold' : 'border-line text-slate hover:border-slate/40'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="test_scope"
+                      value="all"
+                      checked={testScope === 'all'}
+                      onChange={() => setTestScope('all')}
+                      className="text-signal focus:ring-0"
+                    />
+                    <span>All Rows ({items.length})</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Only Empty Rows Checkbox */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={testOnlyEmpty}
+                    onChange={(e) => setTestOnlyEmpty(e.target.checked)}
+                    className="w-4 h-4 rounded border-line text-signal focus:ring-0 cursor-pointer"
+                  />
+                  <span className="font-medium text-ink">Only fill rows that are still empty</span>
+                </label>
+                <p className="text-[11px] text-slate ml-6 mt-0.5">
+                  Preserves any rows where you already entered a count or condition.
+                </p>
+              </div>
+
+              {/* Fill Pattern */}
+              <div>
+                <label className="block font-semibold text-slate uppercase text-[10px] tracking-wider mb-1">
+                  Fill Pattern
+                </label>
+                <select
+                  value={testPattern}
+                  onChange={(e) => setTestPattern(e.target.value)}
+                  className="w-full text-xs bg-surface border border-line rounded-lg px-2.5 py-1.5 text-ink font-medium focus:outline-none focus:border-signal cursor-pointer"
+                >
+                  <option value="realistic">Realistic mix (~80% matched, ~12% shortage, ~8% excess)</option>
+                  <option value="all_matched">All matched (100% matched system qty, 0 diff)</option>
+                  <option value="shortages_excess">Random shortages &amp; excess (50/50 mix)</option>
+                </select>
+              </div>
+
+              {/* Percentage to Fill */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-semibold text-slate uppercase text-[10px] tracking-wider">
+                    Rows to Fill: {testPercentage}%
+                  </label>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="10"
+                  value={testPercentage}
+                  onChange={(e) => setTestPercentage(Number(e.target.value))}
+                  className="w-full accent-amber-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate/70">
+                  <span>10%</span>
+                  <span>50%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {/* Fill Header Fields Checkbox */}
+              <div className="pt-2 border-t border-line/60">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={testFillHeaders}
+                    onChange={(e) => setTestFillHeaders(e.target.checked)}
+                    className="w-4 h-4 rounded border-line text-signal focus:ring-0 cursor-pointer"
+                  />
+                  <span className="font-medium text-ink">Also fill header fields</span>
+                </label>
+                <p className="text-[11px] text-slate ml-6 mt-0.5">
+                  Fills Verifier 1-3 with "Test Verifier 1/2/3" and keeps the verification date.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 border-t border-line bg-surface/50 flex items-center justify-end gap-2">
+              <Button
+                size="small"
+                variant="secondary"
+                label="Cancel"
+                onClick={() => setIsTestModalOpen(false)}
+              />
+              <Button
+                size="small"
+                variant="primary"
+                label="Fill Test Data"
+                onClick={handleFillTestData}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      </div>
     </AppShell>
   );
 };

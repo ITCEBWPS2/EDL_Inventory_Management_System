@@ -12,6 +12,7 @@ const {
   VerificationItem,
   IssuedDestroyedItem,
   SerialCounter,
+  ItemType,
   stripMongo
 } = require('../models');
 const { connect, mongoose } = require('../config/mongo');
@@ -28,6 +29,47 @@ async function ensureConnected() {
 function escapeRegex(text) {
   return (text || '').replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 }
+
+const BUILTIN_CATEGORIES = [
+  { id: '22222222-2222-2222-2222-222222222201', name: 'Furniture', slug: 'furniture', code: 'FUR' },
+  { id: '22222222-2222-2222-2222-222222222202', name: 'IT & Computing Equipment', slug: 'it-computing-equipment', code: 'IT' },
+  { id: '22222222-2222-2222-2222-222222222203', name: 'Network & Communication Equipment', slug: 'network-communication-equipment', code: 'NET' },
+  { id: '22222222-2222-2222-2222-222222222204', name: 'Audio Visual & Presentation Equipment', slug: 'audio-visual-presentation-equipment', code: 'AV' },
+  { id: '22222222-2222-2222-2222-222222222206', name: 'Tools & Equipment', slug: 'tools-equipment', code: 'TLS' }
+];
+
+const BUILTIN_SUBCATEGORIES = [
+  // Furniture
+  { category: 'furniture', categoryName: 'Furniture', name: 'Chairs', slug: 'chairs', code: 'CHR' },
+  { category: 'furniture', categoryName: 'Furniture', name: 'Tables', slug: 'tables', code: 'TBL' },
+  { category: 'furniture', categoryName: 'Furniture', name: 'Cupboards & Cabinets', slug: 'cupboards-cabinets', code: 'CAB' },
+  { category: 'furniture', categoryName: 'Furniture', name: 'Shelving & Racking', slug: 'shelving-racking', code: 'SHL' },
+  { category: 'furniture', categoryName: 'Furniture', name: 'Workstations', slug: 'workstations', code: 'WST' },
+  // IT & Computing Equipment
+  { category: 'it-computing-equipment', categoryName: 'IT & Computing Equipment', name: 'Computers & Peripherals', slug: 'computers-peripherals', code: 'CMP' },
+  { category: 'it-computing-equipment', categoryName: 'IT & Computing Equipment', name: 'Storage Devices', slug: 'storage-devices', code: 'STR' },
+  { category: 'it-computing-equipment', categoryName: 'IT & Computing Equipment', name: 'Printers & Printing Equipment', slug: 'printers-printing-equipment', code: 'PRN' },
+  { category: 'it-computing-equipment', categoryName: 'IT & Computing Equipment', name: 'Scanning & Office Machines', slug: 'scanning-office-machines', code: 'SCN' },
+  // Network & Communication Equipment
+  { category: 'network-communication-equipment', categoryName: 'Network & Communication Equipment', name: 'Network Equipment', slug: 'network-equipment', code: 'NET' },
+  { category: 'network-communication-equipment', categoryName: 'Network & Communication Equipment', name: 'Servers & Storage', slug: 'servers-storage', code: 'SRV' },
+  { category: 'network-communication-equipment', categoryName: 'Network & Communication Equipment', name: 'Telephones & Phones', slug: 'telephones-phones', code: 'TEL' },
+  { category: 'network-communication-equipment', categoryName: 'Network & Communication Equipment', name: 'Cameras', slug: 'cameras', code: 'CAM' },
+  { category: 'network-communication-equipment', categoryName: 'Network & Communication Equipment', name: 'CCTV Recording & Display', slug: 'cctv-recording-display', code: 'CCTV' },
+  // Audio Visual & Presentation Equipment
+  { category: 'audio-visual-presentation-equipment', categoryName: 'Audio Visual & Presentation Equipment', name: 'Audio Equipment', slug: 'audio-equipment', code: 'AUD' },
+  { category: 'audio-visual-presentation-equipment', categoryName: 'Audio Visual & Presentation Equipment', name: 'Display & Presentation', slug: 'display-presentation', code: 'DSP' },
+  // Tools & Equipment
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Hand Tools', slug: 'hand-tools', code: 'HTL' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Electrical Tools & Testing Equipment', slug: 'electrical-tools-testing-equipment', code: 'ETE' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Tool Storage & Handling', slug: 'tool-storage-handling', code: 'TSH' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Safety Equipment & PPE', slug: 'safety-equipment-ppe', code: 'PPE' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Power & Utility Equipment', slug: 'power-utility-equipment', code: 'PUE' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Air Conditioning & Ventilation', slug: 'air-conditioning-ventilation', code: 'ACV' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Cleaning Equipment', slug: 'cleaning-equipment', code: 'CLN' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Kitchen / Refreshment Equipment', slug: 'kitchen-refreshment-equipment', code: 'KTC' },
+  { category: 'tools-equipment', categoryName: 'Tools & Equipment', name: 'Office & General Equipment', slug: 'office-general-equipment', code: 'OGE' }
+];
 
 // Batch & serial resolver matching existing business logic exactly
 function resolveItemSerials(item) {
@@ -194,13 +236,23 @@ const db = {
     };
     const target = aliases[q] || q;
 
-    const doc = await Profile.findOne({
+    let doc = await Profile.findOne({
       $or: [
-        { username: new RegExp(`^${escapeRegex(target)}$`, 'i') },
-        { username: new RegExp(`^${escapeRegex(q)}$`, 'i') },
-        { email: new RegExp(`^${escapeRegex(q)}$`, 'i') }
+        { username: target },
+        { username: q },
+        { email: q }
       ]
-    }).lean();
+    }).collation({ locale: 'en', strength: 2 }).lean();
+
+    if (!doc) {
+      doc = await Profile.findOne({
+        $or: [
+          { username: new RegExp(`^${escapeRegex(target)}$`, 'i') },
+          { username: new RegExp(`^${escapeRegex(q)}$`, 'i') },
+          { email: new RegExp(`^${escapeRegex(q)}$`, 'i') }
+        ]
+      }).lean();
+    }
 
     if (!doc) return null;
     const stripped = stripMongo(doc);
@@ -211,7 +263,10 @@ const db = {
   async getProfileByEmail(email) {
     if (!email) return null;
     const norm = String(email).trim().toLowerCase();
-    const doc = await Profile.findOne({ email: norm }).lean();
+    let doc = await Profile.findOne({ email: norm }).collation({ locale: 'en', strength: 2 }).lean();
+    if (!doc) {
+      doc = await Profile.findOne({ email: new RegExp(`^${escapeRegex(norm)}$`, 'i') }).lean();
+    }
     if (!doc) return null;
     const stripped = stripMongo(doc);
     stripped.passwordHash = stripped.password_hash;
@@ -252,8 +307,8 @@ const db = {
 
     const newProfile = {
       id: profileData.id || uuidv4(),
-      username: profileData.username,
-      full_name: profileData.full_name,
+      username: profileData.username ? String(profileData.username).trim().toLowerCase() : profileData.username,
+      full_name: profileData.full_name ? String(profileData.full_name).trim() : profileData.full_name,
       email: profileData.email ? String(profileData.email).trim().toLowerCase() : undefined,
       role: finalRole,
       permission_level: finalPermission,
@@ -262,10 +317,26 @@ const db = {
       password_hash: passwordHash
     };
 
-    const created = await Profile.create(newProfile);
-    const result = stripMongo(created.toObject());
-    result.passwordHash = result.password_hash;
-    return result;
+    try {
+      const created = await Profile.create(newProfile);
+      const result = stripMongo(created.toObject());
+      result.passwordHash = result.password_hash;
+      return result;
+    } catch (err) {
+      if (err.code === 11000) {
+        if (err.keyPattern?.email || (err.message && err.message.includes('email'))) {
+          const e = new Error('Email already in use.');
+          e.code = 11000;
+          throw e;
+        }
+        if (err.keyPattern?.username || (err.message && err.message.includes('username'))) {
+          const e = new Error('Username already in use.');
+          e.code = 11000;
+          throw e;
+        }
+      }
+      throw err;
+    }
   },
 
   async updateProfile(id, updates, callerRole = null) {
@@ -284,20 +355,40 @@ const db = {
       delete sanitizedUpdates.password;
     }
 
+    if (sanitizedUpdates.username !== undefined) {
+      sanitizedUpdates.username = sanitizedUpdates.username ? String(sanitizedUpdates.username).trim().toLowerCase() : sanitizedUpdates.username;
+    }
+
     if (sanitizedUpdates.email !== undefined) {
       sanitizedUpdates.email = sanitizedUpdates.email ? String(sanitizedUpdates.email).trim().toLowerCase() : sanitizedUpdates.email;
     }
 
-    const updated = await Profile.findOneAndUpdate(
-      { id },
-      { $set: sanitizedUpdates },
-      { returnDocument: 'after' }
-    ).lean();
+    try {
+      const updated = await Profile.findOneAndUpdate(
+        { id },
+        { $set: sanitizedUpdates },
+        { returnDocument: 'after' }
+      ).lean();
 
-    if (!updated) return null;
-    const result = stripMongo(updated);
-    result.passwordHash = result.password_hash;
-    return result;
+      if (!updated) return null;
+      const result = stripMongo(updated);
+      result.passwordHash = result.password_hash;
+      return result;
+    } catch (err) {
+      if (err.code === 11000) {
+        if (err.keyPattern?.email || (err.message && err.message.includes('email'))) {
+          const e = new Error('Email already in use.');
+          e.code = 11000;
+          throw e;
+        }
+        if (err.keyPattern?.username || (err.message && err.message.includes('username'))) {
+          const e = new Error('Username already in use.');
+          e.code = 11000;
+          throw e;
+        }
+      }
+      throw err;
+    }
   },
 
   async countSuperAdmins() {
@@ -386,6 +477,7 @@ const db = {
   },
 
   async createCategory(catData) {
+    await ensureConnected();
     const newCat = {
       id: catData.id || uuidv4(),
       name: catData.name,
@@ -395,6 +487,716 @@ const db = {
     };
     const created = await Category.create(newCat);
     return stripMongo(created.toObject());
+  },
+
+  async updateCategory(id, updateData) {
+    await ensureConnected();
+    const cat = await Category.findOne({ id }).lean();
+    if (!cat) {
+      const err = new Error('Category not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    const rawName = updateData.name !== undefined ? String(updateData.name || '').trim() : cat.name;
+    if (!rawName) {
+      const err = new Error('Category name is required.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length < 2) {
+      const err = new Error('Category name must be at least 2 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length > 60) {
+      const err = new Error('Category name cannot exceed 60 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (/<[^>]*>/i.test(rawName)) {
+      const err = new Error('HTML tags are not allowed in category name.');
+      err.status = 400;
+      throw err;
+    }
+    const validCharsRegex = /^[a-zA-Z0-9\s\-/&().]+$/;
+    if (!validCharsRegex.test(rawName)) {
+      const err = new Error('Only letters, numbers, spaces, and the characters - / & ( ) . are allowed.');
+      err.status = 400;
+      throw err;
+    }
+
+    // Duplicate check excluding self
+    const duplicate = await Category.findOne({
+      id: { $ne: id },
+      name: new RegExp(`^${escapeRegex(rawName)}$`, 'i')
+    }).lean();
+    if (duplicate) {
+      const err = new Error('A category with this name already exists.');
+      err.status = 409;
+      throw err;
+    }
+
+    const updateFields = {
+      name: rawName
+    };
+    if (updateData.description !== undefined) {
+      updateFields.description = String(updateData.description || '').trim();
+    }
+    if (updateData.requires_serial !== undefined) {
+      updateFields.requires_serial = !!updateData.requires_serial;
+    }
+
+    const oldName = cat.name;
+    const updated = await Category.findOneAndUpdate(
+      { id },
+      { $set: updateFields },
+      { returnDocument: 'after' }
+    ).lean();
+
+    if (oldName !== rawName) {
+      // Propagate name to inventory items, transactions, and item types
+      await Promise.all([
+        InventoryItem.updateMany(
+          { $or: [{ category: oldName }, { category_id: id }] },
+          { $set: { category: rawName } }
+        ),
+        ReceivedTransaction.updateMany(
+          { $or: [{ category: oldName }, { category_id: id }] },
+          { $set: { category: rawName } }
+        ),
+        ExpendedTransaction.updateMany(
+          { $or: [{ category: oldName }, { category_id: id }] },
+          { $set: { category: rawName } }
+        ),
+        ItemType.updateMany(
+          { $or: [{ category: oldName }, { category_id: id }] },
+          { $set: { category: rawName } }
+        )
+      ]);
+    }
+
+    return stripMongo(updated);
+  },
+
+  async deleteCategory(id, { userRole } = {}) {
+    await ensureConnected();
+    const cat = await Category.findOne({ $or: [{ id }, { name: new RegExp(`^${escapeRegex(id)}$`, 'i') }] }).lean();
+    if (!cat) {
+      const err = new Error('Category not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    const catSlug = String(cat.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const isBuiltin = BUILTIN_CATEGORIES.some(b => b.id === cat.id || b.slug === catSlug || b.name.toLowerCase() === cat.name.toLowerCase());
+
+    // 1. Count subcategories
+    const inactiveOverrides = await ItemType.find({
+      is_active: false,
+      $or: [
+        { category: new RegExp(`^${escapeRegex(cat.name)}$`, 'i') },
+        { category: new RegExp(`^${escapeRegex(catSlug)}$`, 'i') },
+        { category_slug: catSlug }
+      ]
+    }).lean();
+    const inactiveSlugs = new Set(inactiveOverrides.map(o => o.slug));
+
+    // Active built-ins
+    const activeBuiltinSubcats = BUILTIN_SUBCATEGORIES.filter(
+      b => (b.category === catSlug || b.categoryName.toLowerCase() === cat.name.toLowerCase()) && !inactiveSlugs.has(b.slug)
+    );
+
+    // Custom subcategories in DB
+    const customSubCount = await ItemType.countDocuments({
+      is_active: { $ne: false },
+      is_builtin: { $ne: true },
+      $or: [
+        { category: new RegExp(`^${escapeRegex(cat.name)}$`, 'i') },
+        { category: new RegExp(`^${escapeRegex(catSlug)}$`, 'i') },
+        { category_slug: catSlug },
+        ...(cat.id ? [{ category_id: cat.id }] : [])
+      ]
+    });
+
+    const subcategoriesCount = activeBuiltinSubcats.length + customSubCount;
+
+    // 2. Count inventory items
+    const itemsCount = await InventoryItem.countDocuments({
+      $or: [
+        { category: new RegExp(`^${escapeRegex(cat.name)}$`, 'i') },
+        { category: new RegExp(`^${escapeRegex(catSlug)}$`, 'i') },
+        ...(cat.id ? [{ category_id: cat.id }] : [])
+      ]
+    });
+
+    if (subcategoriesCount > 0 || itemsCount > 0) {
+      const subMsg = `${subcategoriesCount} sub-categor${subcategoriesCount === 1 ? 'y' : 'ies'}`;
+      const itemMsg = `${itemsCount} item${itemsCount === 1 ? '' : 's'}`;
+      const err = new Error(
+        `${cat.name} has ${subMsg} and ${itemMsg}. Remove or move them first.`
+      );
+      err.status = 400;
+      err.blockingSubcategoriesCount = subcategoriesCount;
+      err.blockingItemsCount = itemsCount;
+      throw err;
+    }
+
+    if (isBuiltin && userRole && userRole !== 'super_admin') {
+      const err = new Error('Only Super Admin can delete built-in categories.');
+      err.status = 403;
+      throw err;
+    }
+
+    await Category.deleteOne({ id: cat.id });
+    return stripMongo(cat);
+  },
+
+  // --- Item Types (Sub-categories) ---
+  async getItemTypes(categoryIdentifier = null) {
+    await ensureConnected();
+    let query = { is_active: { $ne: false } };
+    if (categoryIdentifier) {
+      const cleanIdent = String(categoryIdentifier).toLowerCase().trim();
+      const slugIdent = cleanIdent.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const partsRegex = slugIdent.split('-').filter(Boolean).map(escapeRegex).join('[^a-z0-9]+');
+
+      query.$or = [
+        { category: new RegExp(`^${escapeRegex(cleanIdent)}$`, 'i') },
+        { category: new RegExp(`^${escapeRegex(slugIdent)}$`, 'i') },
+        { category: new RegExp(`^${partsRegex}$`, 'i') },
+        { category_id: categoryIdentifier }
+      ];
+    }
+    const docs = await ItemType.find(query).sort({ created_at: 1 }).lean();
+    return stripMongo(docs);
+  },
+
+  async createItemType(typeData) {
+    await ensureConnected();
+    const rawName = String(typeData.name || '').trim();
+    const rawCategory = String(typeData.category || '').trim();
+    if (!rawName) {
+      throw new Error('Type name is required.');
+    }
+    if (rawName.length < 2) {
+      throw new Error('Type name must be at least 2 characters.');
+    }
+    if (rawName.length > 60) {
+      throw new Error('Type name cannot exceed 60 characters.');
+    }
+    if (/<[^>]*>/i.test(rawName)) {
+      throw new Error('HTML tags are not allowed in type name.');
+    }
+    if (!rawCategory) {
+      throw new Error('Category is required.');
+    }
+
+    const slug = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const cleanCategory = rawCategory.toLowerCase().trim();
+    const slugCategory = cleanCategory.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const categoryPartsRegex = slugCategory.split('-').filter(Boolean).map(escapeRegex).join('[^a-z0-9]+');
+
+    // Check duplicate within same category (case-insensitive name or matching slug)
+    const existing = await ItemType.findOne({
+      $and: [
+        {
+          $or: [
+            { category: new RegExp(`^${escapeRegex(cleanCategory)}$`, 'i') },
+            { category: new RegExp(`^${escapeRegex(slugCategory)}$`, 'i') },
+            { category: new RegExp(`^${categoryPartsRegex}$`, 'i') },
+            ...(typeData.category_id ? [{ category_id: typeData.category_id }] : [])
+          ]
+        },
+        {
+          $or: [
+            { name: new RegExp(`^${escapeRegex(rawName)}$`, 'i') },
+            { slug: slug }
+          ]
+        }
+      ]
+    }).lean();
+
+    if (existing) {
+      throw new Error(`This type already exists in ${rawCategory}`);
+    }
+
+    // Generate unique serial number codes
+    const { generateUniqueTypeCodes } = require('../utils/serialNumberGenerator');
+    const existingCategoryTypes = await ItemType.find({
+      $or: [
+        { category: new RegExp(`^${escapeRegex(cleanCategory)}$`, 'i') },
+        { category: new RegExp(`^${escapeRegex(slugCategory)}$`, 'i') },
+        ...(typeData.category_id ? [{ category_id: typeData.category_id }] : [])
+      ]
+    }).lean();
+
+    const generatedCodes = generateUniqueTypeCodes({
+      typeName: rawName,
+      category: rawCategory,
+      existingTypes: existingCategoryTypes
+    });
+
+    const subCatCode = typeData.sub_category_code || typeData.code || generatedCodes.sub_category_code;
+    const itemTypeCode = typeData.item_type_code || generatedCodes.item_type_code;
+
+    const newType = {
+      id: typeData.id || uuidv4(),
+      name: rawName,
+      slug: slug,
+      category: rawCategory,
+      category_id: typeData.category_id || null,
+      sub_category_code: subCatCode,
+      item_type_code: itemTypeCode,
+      code: subCatCode,
+      description: String(typeData.description || '').trim(),
+      created_by: typeData.created_by || null
+    };
+
+    const created = await ItemType.create(newType);
+    return stripMongo(created.toObject());
+  },
+
+  async updateItemType(id, updateData) {
+    await ensureConnected();
+    let doc = await ItemType.findOne({ $or: [{ id }, { slug: id }] }).lean();
+    let builtinMatch = null;
+    if (!doc) {
+      builtinMatch = BUILTIN_SUBCATEGORIES.find(
+        b => b.slug === id || b.slug.toLowerCase() === String(id).toLowerCase() || b.name.toLowerCase() === String(id).toLowerCase()
+      );
+      if (builtinMatch) {
+        const created = await ItemType.create({
+          id: uuidv4(),
+          name: builtinMatch.name,
+          slug: builtinMatch.slug,
+          category: builtinMatch.categoryName,
+          category_slug: builtinMatch.category,
+          sub_category_code: builtinMatch.code,
+          code: builtinMatch.code,
+          is_builtin: true,
+          is_active: true
+        });
+        doc = stripMongo(created.toObject());
+      }
+    }
+
+    if (!doc) {
+      const err = new Error('Item type not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    const rawName = updateData.name !== undefined ? String(updateData.name || '').trim() : doc.name;
+    if (!rawName) {
+      throw new Error('Type name is required.');
+    }
+    if (rawName.length < 2) {
+      throw new Error('Type name must be at least 2 characters.');
+    }
+    if (rawName.length > 60) {
+      throw new Error('Type name cannot exceed 60 characters.');
+    }
+    if (/<[^>]*>/i.test(rawName)) {
+      throw new Error('HTML tags are not allowed in type name.');
+    }
+
+    const cleanCategory = String(doc.category || '').toLowerCase().trim();
+    const slugCategory = cleanCategory.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const newSlug = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    // Duplicate check excluding self
+    const duplicate = await ItemType.findOne({
+      id: { $ne: doc.id },
+      $and: [
+        {
+          $or: [
+            { category: new RegExp(`^${escapeRegex(cleanCategory)}$`, 'i') },
+            { category: new RegExp(`^${escapeRegex(slugCategory)}$`, 'i') },
+            ...(doc.category_id ? [{ category_id: doc.category_id }] : [])
+          ]
+        },
+        {
+          $or: [
+            { name: new RegExp(`^${escapeRegex(rawName)}$`, 'i') },
+            { slug: newSlug }
+          ]
+        }
+      ]
+    }).lean();
+
+    if (duplicate) {
+      throw new Error(`This type already exists in ${doc.category}`);
+    }
+
+    // Check if inventory items exist under this type
+    const itemQuery = {
+      $and: [
+        {
+          $or: [
+            { category: new RegExp(`^${escapeRegex(cleanCategory)}$`, 'i') },
+            { category: new RegExp(`^${escapeRegex(slugCategory)}$`, 'i') },
+            ...(doc.category_id ? [{ category_id: doc.category_id }] : [])
+          ]
+        },
+        {
+          $or: [
+            { sub_type: new RegExp(`^${escapeRegex(doc.name)}$`, 'i') },
+            { sub_type: doc.slug },
+            { sub_type: doc.sub_category_code || doc.code },
+            { sub_classification: new RegExp(`^${escapeRegex(doc.name)}$`, 'i') },
+            { sub_classification: doc.slug }
+          ]
+        }
+      ]
+    };
+    const itemsCount = await InventoryItem.countDocuments(itemQuery);
+
+    const updateFields = {
+      name: rawName,
+      slug: newSlug
+    };
+
+    if (updateData.description !== undefined) {
+      updateFields.description = String(updateData.description || '').trim();
+    }
+
+    // If no items exist yet and codes are explicitly provided or can be re-derived
+    if (itemsCount === 0 && (updateData.sub_category_code || updateData.item_type_code)) {
+      if (updateData.sub_category_code) {
+        updateFields.sub_category_code = String(updateData.sub_category_code).trim().toUpperCase();
+        updateFields.code = updateFields.sub_category_code;
+      }
+      if (updateData.item_type_code) {
+        updateFields.item_type_code = String(updateData.item_type_code).trim().toUpperCase();
+      }
+    }
+
+    const oldName = doc.name;
+    const updated = await ItemType.findOneAndUpdate(
+      { id: doc.id },
+      { $set: updateFields },
+      { returnDocument: 'after' }
+    ).lean();
+
+    if (oldName !== rawName) {
+      await Promise.all([
+        InventoryItem.updateMany(
+          { sub_type: oldName },
+          { $set: { sub_type: rawName } }
+        ),
+        ReceivedTransaction.updateMany(
+          { sub_type: oldName },
+          { $set: { sub_type: rawName } }
+        ),
+        ExpendedTransaction.updateMany(
+          { sub_type: oldName },
+          { $set: { sub_type: rawName } }
+        )
+      ]);
+    }
+
+    return stripMongo(updated);
+  },
+
+  async deleteItemType(id, { userRole } = {}) {
+    await ensureConnected();
+    let doc = await ItemType.findOne({ $or: [{ id }, { slug: id }] }).lean();
+    let builtinMatch = null;
+    if (!doc) {
+      builtinMatch = BUILTIN_SUBCATEGORIES.find(
+        b => b.slug === id || b.slug.toLowerCase() === String(id).toLowerCase() || b.name.toLowerCase() === String(id).toLowerCase()
+      );
+    }
+
+    if (!doc && !builtinMatch) {
+      const err = new Error('Item type not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    const typeName = doc ? doc.name : builtinMatch.name;
+    const typeSlug = doc ? doc.slug : builtinMatch.slug;
+    const typeCode = doc ? (doc.sub_category_code || doc.code) : builtinMatch.code;
+    const isBuiltin = doc ? (!!doc.is_builtin || BUILTIN_SUBCATEGORIES.some(b => b.slug === doc.slug)) : true;
+
+    const cleanCategory = String((doc ? doc.category : builtinMatch.categoryName) || '').toLowerCase().trim();
+    const slugCategory = cleanCategory.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    // Check if any inventory items still belong to this type
+    const query = {
+      $and: [
+        {
+          $or: [
+            { category: new RegExp(`^${escapeRegex(cleanCategory)}$`, 'i') },
+            { category: new RegExp(`^${escapeRegex(slugCategory)}$`, 'i') },
+            ...(doc?.category_id ? [{ category_id: doc.category_id }] : [])
+          ]
+        },
+        {
+          $or: [
+            { sub_type: new RegExp(`^${escapeRegex(typeName)}$`, 'i') },
+            { sub_type: typeSlug },
+            ...(typeCode ? [{ sub_type: typeCode }] : []),
+            { sub_classification: new RegExp(`^${escapeRegex(typeName)}$`, 'i') },
+            { sub_classification: typeSlug }
+          ]
+        }
+      ]
+    };
+
+    const blockingItemCount = await InventoryItem.countDocuments(query);
+    if (blockingItemCount > 0) {
+      const err = new Error(`Cannot delete item type '${typeName}': ${blockingItemCount} inventory item(s) are still associated with it.`);
+      err.status = 400;
+      err.blockingItemCount = blockingItemCount;
+      throw err;
+    }
+
+    if (isBuiltin && userRole && userRole !== 'super_admin') {
+      const err = new Error('Only Super Admin can delete built-in sub-categories.');
+      err.status = 403;
+      throw err;
+    }
+
+    if (isBuiltin) {
+      if (doc) {
+        await ItemType.updateOne({ id: doc.id }, { $set: { is_active: false } });
+      } else {
+        await ItemType.create({
+          id: uuidv4(),
+          name: builtinMatch.name,
+          slug: builtinMatch.slug,
+          category: builtinMatch.categoryName,
+          category_slug: builtinMatch.category,
+          sub_category_code: builtinMatch.code,
+          code: builtinMatch.code,
+          is_builtin: true,
+          is_active: false
+        });
+      }
+      return doc || builtinMatch;
+    }
+
+    await ItemType.deleteOne({ id: doc.id });
+    return stripMongo(doc);
+  },
+
+  // --- Subcategory Item Types (e.g. Bench under Chairs) ---
+  async getCustomItemTypes({ subcategory = null, category = null } = {}) {
+    await ensureConnected();
+    const query = { is_active: { $ne: false } };
+    if (subcategory) {
+      query.subcategory_slug = String(subcategory).toLowerCase().trim();
+    }
+    if (category) {
+      query.category_slug = String(category).toLowerCase().trim();
+    }
+    if (!subcategory && !category) {
+      query.subcategory_slug = { $exists: true, $ne: null };
+    }
+    const docs = await ItemType.find(query).sort({ name: 1 }).lean();
+    return stripMongo(docs);
+  },
+
+  async createCustomItemType({ subcategory_slug, name, category_slug = null, user_id = null }) {
+    await ensureConnected();
+    const rawName = String(name || '').trim();
+    const subcat = String(subcategory_slug || '').toLowerCase().trim();
+
+    if (!subcat) {
+      const err = new Error('Sub-category is required.');
+      err.status = 400;
+      throw err;
+    }
+    if (!rawName) {
+      const err = new Error('Type name is required.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length < 2) {
+      const err = new Error('Type name must be at least 2 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length > 60) {
+      const err = new Error('Type name cannot exceed 60 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (!/^[a-zA-Z0-9\s\-\/&().]+$/.test(rawName)) {
+      const err = new Error('Type name may only contain letters, numbers, spaces, and - / & ( ) . characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (/<[^>]*>/i.test(rawName)) {
+      const err = new Error('HTML tags are not allowed in type name.');
+      err.status = 400;
+      throw err;
+    }
+
+    const norm = rawName.toLowerCase().replace(/\s+/g, ' ');
+
+    // 1. Check duplicate against built-in options
+    const { BUILTIN_ITEM_TYPES } = require('../constants/builtinItemTypes');
+    const builtInOptions = BUILTIN_ITEM_TYPES[subcat] || [];
+    const isBuiltinDuplicate = builtInOptions.some(
+      opt => opt.toLowerCase().trim().replace(/\s+/g, ' ') === norm
+    );
+    if (isBuiltinDuplicate) {
+      const err = new Error('This type already exists.');
+      err.status = 409;
+      err.duplicateType = 'builtin';
+      throw err;
+    }
+
+    // 2. Check duplicate against existing custom types in DB
+    const existing = await ItemType.findOne({
+      subcategory_slug: subcat,
+      name_normalized: norm,
+      is_active: { $ne: false }
+    }).lean();
+    if (existing) {
+      const err = new Error('This type already exists.');
+      err.status = 409;
+      err.duplicateType = 'custom';
+      err.existing = stripMongo(existing);
+      throw err;
+    }
+
+    // 3. Resolve subcat code and generate unique type code
+    const {
+      resolveSubCategoryCode,
+      generateItemTypeCodeCandidate,
+      registerCustomItemTypeCode
+    } = require('../utils/serialNumberGenerator');
+
+    const subCatCode = resolveSubCategoryCode(subcat);
+
+    // Collect all existing codes for this subcategory
+    const allForSubcat = await ItemType.find({ subcategory_slug: subcat }).lean();
+    const existingCodes = allForSubcat.map(t => t.code).filter(Boolean);
+
+    const uniqueCode = generateItemTypeCodeCandidate(rawName, existingCodes);
+    const itemTypeCode = `${uniqueCode}-${subCatCode}`;
+
+    const newDoc = {
+      id: uuidv4(),
+      subcategory_slug: subcat,
+      category_slug: category_slug ? String(category_slug).toLowerCase().trim() : null,
+      name: rawName,
+      name_normalized: norm,
+      code: uniqueCode,
+      item_type_code: itemTypeCode,
+      created_by: user_id,
+      unit_id: null, // system-wide by default
+      is_active: true
+    };
+
+    const created = await ItemType.create(newDoc);
+    registerCustomItemTypeCode(rawName, uniqueCode, subCatCode);
+
+    return stripMongo(created.toObject());
+  },
+
+  async updateCustomItemType(id, { name }) {
+    await ensureConnected();
+    const rawName = String(name || '').trim();
+    if (!rawName) {
+      const err = new Error('Type name is required.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length < 2) {
+      const err = new Error('Type name must be at least 2 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (rawName.length > 60) {
+      const err = new Error('Type name cannot exceed 60 characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (!/^[a-zA-Z0-9\s\-\/&().]+$/.test(rawName)) {
+      const err = new Error('Type name may only contain letters, numbers, spaces, and - / & ( ) . characters.');
+      err.status = 400;
+      throw err;
+    }
+    if (/<[^>]*>/i.test(rawName)) {
+      const err = new Error('HTML tags are not allowed in type name.');
+      err.status = 400;
+      throw err;
+    }
+
+    const doc = await ItemType.findOne({ id }).lean();
+    if (!doc) {
+      const err = new Error('Item type not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    const norm = rawName.toLowerCase().replace(/\s+/g, ' ');
+
+    // Check duplicate against built-in
+    const { BUILTIN_ITEM_TYPES } = require('../constants/builtinItemTypes');
+    const builtInOptions = BUILTIN_ITEM_TYPES[doc.subcategory_slug] || [];
+    if (builtInOptions.some(opt => opt.toLowerCase().trim().replace(/\s+/g, ' ') === norm)) {
+      const err = new Error('This type already exists.');
+      err.status = 409;
+      throw err;
+    }
+
+    // Check duplicate against other custom types
+    const duplicate = await ItemType.findOne({
+      id: { $ne: id },
+      subcategory_slug: doc.subcategory_slug,
+      name_normalized: norm,
+      is_active: { $ne: false }
+    }).lean();
+    if (duplicate) {
+      const err = new Error('This type already exists.');
+      err.status = 409;
+      throw err;
+    }
+
+    // Update name and name_normalized only (code remains unchanged)
+    const updated = await ItemType.findOneAndUpdate(
+      { id },
+      { $set: { name: rawName, name_normalized: norm, updated_at: new Date() } },
+      { new: true }
+    ).lean();
+
+    return stripMongo(updated);
+  },
+
+  async deleteCustomItemType(id) {
+    await ensureConnected();
+    const doc = await ItemType.findOne({ id }).lean();
+    if (!doc) {
+      const err = new Error('Item type not found.');
+      err.status = 404;
+      throw err;
+    }
+
+    // Check if any inventory item uses this type
+    const query = {
+      $or: [
+        { item_name: new RegExp(`^${escapeRegex(doc.name)}$`, 'i') },
+        { sub_classification: new RegExp(`^${escapeRegex(doc.name)}$`, 'i') },
+        ...(doc.code ? [{ item_code: new RegExp(`/${escapeRegex(doc.code)}-`, 'i') }] : [])
+      ]
+    };
+
+    const count = await InventoryItem.countDocuments(query);
+    if (count > 0) {
+      const err = new Error(`Cannot delete item type '${doc.name}' because it is being used by ${count} inventory item(s).`);
+      err.status = 400;
+      err.blockingItemCount = count;
+      throw err;
+    }
+
+    await ItemType.deleteOne({ id });
+    return stripMongo(doc);
   },
 
   // --- Inventory Items ---
@@ -570,7 +1372,7 @@ const db = {
     return stripMongo(created.toObject());
   },
 
-  async getNextSerialNumber({ unit_id, category, sub_type, item_type }) {
+  async getNextSerialNumber({ unit_id, category, category_name, sub_type, sub_category, item_type }) {
     const unit = (await Unit.findOne({ id: unit_id }).lean()) || { unit_name: unit_id, unit_code: unit_id };
     const {
       generateSerialNumber,
@@ -581,9 +1383,25 @@ const db = {
       CONSTANT_PREFIX
     } = require('../utils/serialNumberGenerator');
 
+    const catInput = category || category_name;
+    const subTypeInput = sub_type || sub_category;
+
     const unitCode = resolveUnitCode(unit);
-    const catCode = resolveCategoryCode(category);
-    const subCatCode = resolveSubCategoryCode(sub_type);
+    const catCode = resolveCategoryCode(catInput);
+    const subCatCode = resolveSubCategoryCode(subTypeInput);
+
+    const customTypeDoc = await ItemType.findOne({
+      $or: [
+        { name_normalized: String(item_type).toLowerCase().trim().replace(/\s+/g, ' ') },
+        { name: new RegExp(`^${escapeRegex(String(item_type).trim())}$`, 'i') }
+      ],
+      is_active: { $ne: false }
+    }).lean();
+    if (customTypeDoc && customTypeDoc.code) {
+      const { registerCustomItemTypeCode } = require('../utils/serialNumberGenerator');
+      registerCustomItemTypeCode(customTypeDoc.name, customTypeDoc.code, subCatCode);
+    }
+
     const itemTypeCode = deriveItemTypeCode(item_type, subCatCode);
     const basePrefix = `${CONSTANT_PREFIX}/${unitCode}/${catCode}/${subCatCode}/${itemTypeCode}-`;
 
@@ -617,15 +1435,15 @@ const db = {
 
     return generateSerialNumber({
       unit,
-      category,
-      subCategory: sub_type,
+      category: catInput,
+      subCategory: subTypeInput,
       itemType: item_type,
       existingItems: [],
       serverCounters
     });
   },
 
-  async getNextBatchSerialNumbers({ unit_id, category, sub_type, item_type, quantity = 1 }) {
+  async getNextBatchSerialNumbers({ unit_id, category, category_name, sub_type, sub_category, item_type, quantity = 1 }) {
     const unit = (await Unit.findOne({ id: unit_id }).lean()) || { unit_name: unit_id, unit_code: unit_id };
     const {
       generateBatchSerialNumbers,
@@ -636,9 +1454,25 @@ const db = {
       CONSTANT_PREFIX
     } = require('../utils/serialNumberGenerator');
 
+    const catInput = category || category_name;
+    const subTypeInput = sub_type || sub_category;
+
     const unitCode = resolveUnitCode(unit);
-    const catCode = resolveCategoryCode(category);
-    const subCatCode = resolveSubCategoryCode(sub_type);
+    const catCode = resolveCategoryCode(catInput);
+    const subCatCode = resolveSubCategoryCode(subTypeInput);
+
+    const customTypeDoc = await ItemType.findOne({
+      $or: [
+        { name_normalized: String(item_type).toLowerCase().trim().replace(/\s+/g, ' ') },
+        { name: new RegExp(`^${escapeRegex(String(item_type).trim())}$`, 'i') }
+      ],
+      is_active: { $ne: false }
+    }).lean();
+    if (customTypeDoc && customTypeDoc.code) {
+      const { registerCustomItemTypeCode } = require('../utils/serialNumberGenerator');
+      registerCustomItemTypeCode(customTypeDoc.name, customTypeDoc.code, subCatCode);
+    }
+
     const itemTypeCode = deriveItemTypeCode(item_type, subCatCode);
     const basePrefix = `${CONSTANT_PREFIX}/${unitCode}/${catCode}/${subCatCode}/${itemTypeCode}-`;
 
@@ -670,8 +1504,8 @@ const db = {
 
     return generateBatchSerialNumbers({
       unit,
-      category,
-      subCategory: sub_type,
+      category: catInput,
+      subCategory: subTypeInput,
       itemType: item_type,
       quantity,
       existingItems: [],
@@ -737,6 +1571,11 @@ const db = {
         unit_name: unit.unit_name || ''
       };
     });
+  },
+
+  async getReceivedTransactionById(id) {
+    const found = await ReceivedTransaction.findOne({ id }).lean();
+    return stripMongo(found);
   },
 
   async createReceivedTransaction(data) {
@@ -896,6 +1735,179 @@ const db = {
 
   // --- Computed Remaining View ---
   getComputedRemaining,
+
+  /**
+   * Flat Current Inventory – built directly from inventory_items
+   * Expands all serial numbers in batch/serialized items so every individual serial has its own row.
+   * Format: No | Serial No. | Inventory Category | Item Description | Unit
+   */
+  async getFlatCurrentInventory(targetUnits = null, category = null, search = '') {
+    await ensureConnected();
+
+    let query = {};
+    if (targetUnits && targetUnits.length > 0) {
+      query.unit_id = { $in: targetUnits };
+    }
+    if (category && category !== 'all' && category !== 'All Categories') {
+      const catLower = category.toLowerCase().trim();
+      query.$or = [
+        { category: new RegExp(`^${escapeRegex(catLower)}$`, 'i') },
+        { category_id: category }
+      ];
+    }
+
+    const [items, allUnits] = await Promise.all([
+      InventoryItem.find(query).lean(),
+      Unit.find({}).lean()
+    ]);
+
+    const unitsMap = new Map(allUnits.map(u => [u.id, u.unit_name || 'Unknown Unit']));
+
+    const clean = (t) => (t || '').toString().toLowerCase().trim();
+    const searchFilter = (item, serial) => {
+      if (!search || !search.trim()) return true;
+      const q = clean(search);
+      return (
+        clean(item.item_name).includes(q) ||
+        clean(item.item_code).includes(q) ||
+        clean(item.category).includes(q) ||
+        clean(item.sub_type).includes(q) ||
+        clean(item.sub_classification).includes(q) ||
+        clean(item.description).includes(q) ||
+        clean(item.brand).includes(q) ||
+        clean(serial).includes(q) ||
+        (Array.isArray(item.serial_numbers) && item.serial_numbers.some(s => clean(s).includes(q))) ||
+        (Array.isArray(item.manufacturer_serial_numbers) && item.manufacturer_serial_numbers.some(m => clean(m).includes(q)))
+      );
+    };
+
+    const flatRows = [];
+
+    for (const item of items) {
+      const unitName = unitsMap.get(item.unit_id) || 'Unknown Unit';
+      const rawSerials = Array.isArray(item.serial_numbers) ? item.serial_numbers.filter(Boolean) : [];
+      const qty = Number(item.quantity || 0);
+
+      if (rawSerials.length > 0) {
+        // Expand ALL serial numbers from the batch/serialized item
+        rawSerials.forEach((sn, idx) => {
+          if (!searchFilter(item, sn)) return;
+          flatRows.push({
+            id: `${item.id}_${idx}`,
+            inventory_item_id: item.id,
+            item_code: sn,
+            serial_no: sn,
+            serial_number: sn,
+            inventory_category: item.category || 'General',
+            category: item.category || 'General',
+            sub_category: item.sub_type || '',
+            sub_type: item.sub_type || '',
+            item_description: item.item_name || '',
+            item_name: item.item_name || '',
+            unit_id: item.unit_id,
+            unit_name: unitName,
+            quantity: 1,
+            stock_status: item.status || 'In Stock'
+          });
+        });
+      } else if (qty > 1) {
+        // Legacy items with quantity > 1 but empty serial_numbers array:
+        // Try deriving serials if item_code ends with sequential digits
+        const baseCode = (item.item_code || '').trim();
+        const match = baseCode.match(/^(.*?)(\d+)$/);
+        const canDerive = match && match[2].length <= 6 && parseInt(match[2], 10) < 1000000 && qty <= 100;
+
+        if (canDerive) {
+          const prefix = match[1];
+          const numDigits = Math.max(3, match[2].length);
+          const startNum = parseInt(match[2], 10);
+          for (let i = 0; i < qty; i++) {
+            const derivedSn = `${prefix}${String(startNum + i).padStart(numDigits, '0')}`;
+            if (!searchFilter(item, derivedSn)) continue;
+            flatRows.push({
+              id: `${item.id}_${i}`,
+              inventory_item_id: item.id,
+              item_code: derivedSn,
+              serial_no: derivedSn,
+              serial_number: derivedSn,
+              inventory_category: item.category || 'General',
+              category: item.category || 'General',
+              sub_category: item.sub_type || '',
+              sub_type: item.sub_type || '',
+              item_description: item.item_name || '',
+              item_name: item.item_name || '',
+              unit_id: item.unit_id,
+              unit_name: unitName,
+              quantity: 1,
+              stock_status: item.status || 'In Stock'
+            });
+          }
+        } else {
+          // Cannot derive serials: show 1 row with quantity noted
+          const serialNo = item.item_code || '—';
+          if (searchFilter(item, serialNo)) {
+            flatRows.push({
+              id: item.id,
+              inventory_item_id: item.id,
+              item_code: serialNo,
+              serial_no: serialNo,
+              serial_number: serialNo,
+              inventory_category: item.category || 'General',
+              category: item.category || 'General',
+              sub_category: item.sub_type || '',
+              sub_type: item.sub_type || '',
+              item_description: `${item.item_name || 'Item'} (Qty: ${qty})`,
+              item_name: `${item.item_name || 'Item'} (Qty: ${qty})`,
+              unit_id: item.unit_id,
+              unit_name: unitName,
+              quantity: qty,
+              stock_status: item.status || 'In Stock'
+            });
+          }
+        }
+      } else {
+        // Single item (qty <= 1 and rawSerials is empty)
+        const serialNo = item.item_code || item.serial_number || '—';
+        if (searchFilter(item, serialNo)) {
+          flatRows.push({
+            id: item.id,
+            inventory_item_id: item.id,
+            item_code: serialNo,
+            serial_no: serialNo,
+            serial_number: serialNo,
+            inventory_category: item.category || 'General',
+            category: item.category || 'General',
+            sub_category: item.sub_type || '',
+            sub_type: item.sub_type || '',
+            item_description: item.item_name || '',
+            item_name: item.item_name || '',
+            unit_id: item.unit_id,
+            unit_name: unitName,
+            quantity: qty || 1,
+            stock_status: item.status || 'In Stock'
+          });
+        }
+      }
+    }
+
+    // Sort order: Category, then sub-category, then item name, then serial number (numeric sequence)
+    flatRows.sort((a, b) => {
+      const catCmp = (a.inventory_category || '').toLowerCase().localeCompare((b.inventory_category || '').toLowerCase());
+      if (catCmp !== 0) return catCmp;
+
+      const subCmp = (a.sub_category || '').toLowerCase().localeCompare((b.sub_category || '').toLowerCase());
+      if (subCmp !== 0) return subCmp;
+
+      const nameCmp = (a.item_description || '').toLowerCase().localeCompare((b.item_description || '').toLowerCase());
+      if (nameCmp !== 0) return nameCmp;
+
+      const serA = a.serial_no || a.serial_number || '';
+      const serB = b.serial_no || b.serial_number || '';
+      return serA.localeCompare(serB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    return flatRows;
+  },
 
   async getRemainingInventory(unitIds = null, category = null, search = '') {
     let list = await getComputedRemaining();
@@ -1584,6 +2596,35 @@ const db = {
       return true;
     }
     return false;
+  },
+
+  async clearDraftTestItems(unitId) {
+    if (!unitId) return { clearedCount: 0, remainingCount: 0 };
+    const draft = await Verification.findOne({ unit_id: unitId, status: 'draft' });
+    if (!draft) return { clearedCount: 0, remainingCount: 0 };
+
+    const delRes = await VerificationItem.deleteMany({
+      verification_id: draft.id,
+      label_no: /^TEST-/i
+    });
+
+    let headerChanged = false;
+    ['verifier_1', 'verifier_2', 'verifier_3'].forEach(k => {
+      if (draft[k] && /^Test Verifier/i.test(draft[k])) {
+        draft[k] = '';
+        headerChanged = true;
+      }
+    });
+    if (headerChanged) {
+      draft.verified_by = [draft.verifier_1, draft.verifier_2, draft.verifier_3].filter(Boolean);
+      await draft.save();
+    }
+
+    const remainingCount = await VerificationItem.countDocuments({ verification_id: draft.id });
+    return {
+      clearedCount: delRes.deletedCount,
+      remainingCount
+    };
   },
 
   // --- Issued / Destroyed Items ---

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { api } from '../../services/api';
+import { Button } from '../common/Button';
 import {
   Printer,
   X,
@@ -138,6 +140,10 @@ export const PrintLabelsModal = ({
   const [isPrinting, setIsPrinting] = useState(false);
 
   const previewContainerRef = useRef(null);
+  const dialogRef = useRef(null);
+  const openerRef = useRef(null);
+  const leftPanelRef = useRef(null);
+  const isBackdropMouseDownRef = useRef(false);
   const [previewContainerWidth, setPreviewContainerWidth] = useState(440);
 
   // Measure preview container for accurate proportional scaling
@@ -168,16 +174,81 @@ export const PrintLabelsModal = ({
     }
   }, [isOpen, itemsToPrint]);
 
-  // Handle ESC key to close
+  // Lock body scroll when modal is open
   useEffect(() => {
     if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+    };
+  }, [isOpen]);
+
+  // Accessibility: focus trap, scroll settings to top on open, and keyboard listeners (Esc / Tab)
+  useEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement;
+
+    // Scroll settings panel to the top when dialog opens
+    leftPanelRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+
+    // Move initial focus into modal
+    const focusTimer = setTimeout(() => {
+      if (dialogRef.current) {
+        const focusable = dialogRef.current.querySelector(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+        );
+        focusable?.focus();
+      }
+    }, 40);
+
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+          )
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+      if (openerRef.current && typeof openerRef.current.focus === 'function') {
+        openerRef.current.focus();
+      }
+    };
   }, [isOpen, onClose]);
 
   // Resolve current active preset
@@ -224,6 +295,17 @@ export const PrintLabelsModal = ({
 
   // Sheet grid layout calculation
   const sheetLayout = useMemo(() => {
+    if (options.layoutMode === 'roll') {
+      return {
+        columns: 1,
+        rows: 1,
+        labelsPerPage: 1,
+        availableWidth: effectiveLabelWidth,
+        availableHeight: effectiveLabelHeight,
+        labelWidthMm: effectiveLabelWidth,
+        labelHeightMm: effectiveLabelHeight
+      };
+    }
     return calculateSheetLayout({
       pageWidthMm: PAGE_DIMENSIONS.A4.widthMm,
       pageHeightMm: PAGE_DIMENSIONS.A4.heightMm,
@@ -236,24 +318,24 @@ export const PrintLabelsModal = ({
       gapXMm: effectiveMargins.gapX,
       gapYMm: effectiveMargins.gapY
     });
-  }, [effectiveLabelWidth, effectiveLabelHeight, effectiveMargins]);
+  }, [options.layoutMode, effectiveLabelWidth, effectiveLabelHeight, effectiveMargins]);
 
   // Build printable items chunked by page
   const printData = useMemo(() => {
     return buildPrintItems({
       items: itemsToPrint,
       copies: options.copies,
-      startPosition: options.startPosition,
-      layoutMode: 'sheet',
+      startPosition: options.layoutMode === 'roll' ? 1 : options.startPosition,
+      layoutMode: options.layoutMode || 'sheet',
       labelsPerPage: sheetLayout.labelsPerPage
     });
-  }, [itemsToPrint, options.copies, options.startPosition, sheetLayout.labelsPerPage]);
+  }, [itemsToPrint, options.copies, options.startPosition, options.layoutMode, sheetLayout.labelsPerPage]);
 
   const totalPages = printData.totalPages;
   const safeCurrentPage = Math.min(Math.max(0, currentPage), totalPages - 1);
   const activePageItems = printData.pages[safeCurrentPage] || [];
 
-  const isLargePrintJob = printData.totalLabels > 300;
+  const isLargePrintJob = printData.totalLabels > 100;
 
   // Check if any serial number is too long to fit even at minimum font size (5pt)
   const labelTooNarrowWarning = useMemo(() => {
@@ -282,6 +364,14 @@ export const PrintLabelsModal = ({
   const targetSheetWidthPx = Math.min(previewContainerWidth - 24, 440);
   const sheetScale = Math.max(0.2, targetSheetWidthPx / a4WidthPx);
 
+  const rollWidthPx = effectiveLabelWidth * 3.779527;
+  const rollHeightPx = effectiveLabelHeight * 3.779527;
+  const rollScale = Math.min(
+    Math.max(0.6, (previewContainerWidth - 48) / rollWidthPx),
+    300 / Math.max(1, rollHeightPx),
+    2.2
+  );
+
   // Execute browser print
   const handlePrint = () => {
     if (isLargePrintJob && !confirmedLargePrint) {
@@ -290,6 +380,15 @@ export const PrintLabelsModal = ({
     }
     setIsPrinting(true);
     document.body.classList.add('printing-serial-labels');
+
+    try {
+      api.post('/audit-logs/log-action', {
+        action: 'PRINT',
+        module: 'Inventory',
+        entity_type: 'SerialLabels',
+        description: `Printed ${printData.totalLabels} serial label(s) for ${itemsToPrint.length} item(s)`
+      }).catch(() => {});
+    } catch {}
 
     setTimeout(() => {
       window.print();
@@ -306,390 +405,558 @@ export const PrintLabelsModal = ({
   };
 
   if (!isOpen) return null;
+  if (typeof document === 'undefined') return null;
 
   return (
     <>
-      {/* Modal Dialog for Screen View */}
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-ink/60 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto no-print"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="print-labels-modal-title"
-      >
-        <div className="bg-card w-full max-w-5xl rounded-2xl border border-line shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
-          {/* Header */}
-          <div className="p-4 border-b border-line flex items-center justify-between bg-surface/70 shrink-0">
-            <div className="flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-signal/15 text-signal flex items-center justify-center">
-                <Printer className="w-4 h-4" />
-              </span>
-              <div>
-                <h2 id="print-labels-modal-title" className="font-semibold text-ink text-sm sm:text-base">
-                  Print Serial Labels
-                </h2>
-                <p className="text-[11px] text-slate">
-                  <span className="font-semibold text-ink">{printData.totalLabels}</span> labels to print &bull;{' '}
-                  <span className="font-semibold text-ink">{itemsToPrint.length}</span> unique serial numbers &bull;{' '}
-                  <span className="font-semibold text-ink">{totalPages}</span> sheet(s)
-                </p>
+      {/* Modal Dialog for Screen View - Portalled to document.body */}
+      {createPortal(
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-4 bg-ink/75 backdrop-blur-xs overflow-hidden no-print"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="print-labels-modal-title"
+          onMouseDown={(e) => {
+            isBackdropMouseDownRef.current = (e.target === e.currentTarget);
+          }}
+          onMouseUp={(e) => {
+            if (e.target !== e.currentTarget) {
+              isBackdropMouseDownRef.current = false;
+            }
+          }}
+          onClick={(e) => {
+            if (isBackdropMouseDownRef.current && e.target === e.currentTarget) {
+              onClose();
+            }
+            isBackdropMouseDownRef.current = false;
+          }}
+        >
+          <div
+            ref={dialogRef}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="relative w-full max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] rounded-2xl border border-line bg-card shadow-2xl flex flex-col overflow-hidden m-auto shrink-0 animate-scale-up"
+            style={{
+              width: 'min(1100px, calc(100vw - 32px))'
+            }}
+          >
+            {/* Header - Fixed at top, flex: 0 0 auto */}
+            <div
+              className="p-3.5 sm:p-4 border-b border-line flex items-center justify-between bg-surface/80 shrink-0 select-none"
+              style={{ flex: '0 0 auto' }}
+            >
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-lg bg-signal/15 text-signal flex items-center justify-center shrink-0">
+                  <Printer className="w-4 h-4" />
+                </span>
+                <div>
+                  <h2 id="print-labels-modal-title" className="font-semibold text-ink text-sm sm:text-base">
+                    Print Serial Labels
+                  </h2>
+                  <p className="text-[11px] text-slate">
+                    <span className="font-semibold text-ink">{printData.totalLabels}</span> labels to print &bull;{' '}
+                    <span className="font-semibold text-ink">{itemsToPrint.length}</span> unique serial numbers &bull;{' '}
+                    <span className="font-semibold text-ink">{totalPages}</span> {options.layoutMode === 'roll' ? 'label(s)' : 'sheet(s)'}
+                  </p>
+                </div>
               </div>
+
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={onClose}
+                aria-label="Close dialog"
+                title="Close dialog (Esc)"
+                icon={X}
+              />
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-slate hover:text-ink hover:bg-surface transition-colors"
-              title="Close modal (Esc)"
+            {/* Modal Body: Left Controls, Right Preview */}
+            <div
+              className="flex-1 min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-line max-lg:overflow-y-auto"
+              style={{ flex: '1 1 auto', minHeight: 0 }}
             >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Modal Body: Left Controls, Right Preview */}
-          <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-line">
-            {/* Left Controls Panel */}
-            <div className="lg:col-span-5 p-4 sm:p-5 space-y-4 overflow-y-auto text-xs bg-surface/20">
-              {/* Narrow Label Warning Banner */}
-              {labelTooNarrowWarning && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-900 flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="text-[11px] leading-relaxed">
-                    <strong>Label too narrow for this serial number:</strong> increase the label width or select a wider preset.
-                  </div>
-                </div>
-              )}
-
-              {/* Label Size Preset */}
-              <div>
-                <label className="block font-semibold text-ink mb-1.5 uppercase text-[10px] tracking-wider text-slate">
-                  Label Size Preset
-                </label>
-                <div className="space-y-1.5">
-                  {Object.values(LABEL_PRESETS).map((preset) => {
-                    const isSelected = options.presetId === preset.id;
-                    return (
-                      <label
-                        key={preset.id}
-                        className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'border-signal bg-signal/10 text-ink'
-                            : 'border-line bg-card hover:bg-surface/80 text-slate'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="radio"
-                            name="presetId"
-                            checked={isSelected}
-                            onChange={() => setOptions(o => ({ ...o, presetId: preset.id }))}
-                            className="w-3.5 h-3.5 accent-signal text-signal cursor-pointer"
-                          />
-                          <div>
-                            <div className="font-semibold text-ink text-xs">{preset.label}</div>
-                            {preset.id !== 'custom' && (
-                              <div className="text-[10px] text-slate">
-                                {preset.defaultColumns} cols × {preset.defaultRows} rows = {preset.defaultColumns * preset.defaultRows} labels / sheet
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-
-                {/* Custom Size Inputs */}
-                {options.presetId === 'custom' && (
-                  <div className="mt-3 p-3 bg-surface rounded-lg border border-line grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] text-slate mb-1">Width (mm)</label>
-                      <input
-                        type="number"
-                        min="20"
-                        max="210"
-                        value={options.customWidthMm}
-                        onChange={(e) => setOptions(o => ({ ...o, customWidthMm: e.target.value }))}
-                        className="w-full px-2.5 py-1.5 bg-card border border-line rounded text-xs font-mono text-ink"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-slate mb-1">Height (mm)</label>
-                      <input
-                        type="number"
-                        min="10"
-                        max="297"
-                        value={options.customHeightMm}
-                        onChange={(e) => setOptions(o => ({ ...o, customHeightMm: e.target.value }))}
-                        className="w-full px-2.5 py-1.5 bg-card border border-line rounded text-xs font-mono text-ink"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Quantity & Sheet Position */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-ink mb-1">Copies per serial</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={options.copies}
-                    onChange={(e) => setOptions(o => ({ ...o, copies: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
-                    className="w-full px-3 py-1.5 bg-card border border-line rounded text-xs font-mono font-medium text-ink"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-ink mb-1" title="Reuse partly used sticker sheets">
-                    Start at position
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={sheetLayout.labelsPerPage || 100}
-                    value={options.startPosition}
-                    onChange={(e) => setOptions(o => ({ ...o, startPosition: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
-                    className="w-full px-3 py-1.5 bg-card border border-line rounded text-xs font-mono font-medium text-ink"
-                    title="Skips used stickers on the first sheet"
-                  />
-                </div>
-              </div>
-
-              {/* Advanced Margins Toggle */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedMargins(!showAdvancedMargins)}
-                  className="text-signal hover:underline text-[11px] font-medium flex items-center gap-1"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>{showAdvancedMargins ? 'Hide Advanced Margins & Gaps' : 'Customize Margins & Spacing'}</span>
-                </button>
-
-                {showAdvancedMargins && (
-                  <div className="mt-2 p-3 bg-card rounded-lg border border-line grid grid-cols-2 gap-2 text-[11px]">
-                    <div>
-                      <label className="text-slate block mb-0.5">Top Margin (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="40"
-                        value={options.marginTopMm}
-                        onChange={(e) => setOptions(o => ({ ...o, marginTopMm: e.target.value }))}
-                        className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate block mb-0.5">Left Margin (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="40"
-                        value={options.marginLeftMm}
-                        onChange={(e) => setOptions(o => ({ ...o, marginLeftMm: e.target.value }))}
-                        className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate block mb-0.5">Col Gap X (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="20"
-                        value={options.gapXMm}
-                        onChange={(e) => setOptions(o => ({ ...o, gapXMm: e.target.value }))}
-                        className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate block mb-0.5">Row Gap Y (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="20"
-                        value={options.gapYMm}
-                        onChange={(e) => setOptions(o => ({ ...o, gapYMm: e.target.value }))}
-                        className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Large Print Warning */}
-              {isLargePrintJob && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-900 space-y-2">
-                  <div className="flex items-start gap-2">
+              {/* Left Controls Panel - Scrollable with its own scrollbar */}
+              <div
+                ref={leftPanelRef}
+                className="lg:col-span-5 p-4 sm:p-5 space-y-4 overflow-y-auto min-h-0 text-xs bg-surface/20"
+                style={{ minHeight: 0 }}
+              >
+                {/* Narrow Label Warning Banner */}
+                {labelTooNarrowWarning && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-900 flex items-start gap-2.5">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-semibold text-xs text-amber-900">Large Print Job Notice</div>
-                      <div className="text-[11px] text-amber-800 leading-normal">
-                        This will print <strong>{printData.totalLabels}</strong> labels over <strong>{totalPages}</strong> sheets.
+                    <div className="text-[11px] leading-relaxed">
+                      <strong>Label too narrow for this serial number:</strong> increase the label width or select a wider preset.
+                    </div>
+                  </div>
+                )}
+
+                {/* Printer Layout Type: Sheet A4 vs Roll Single */}
+                <div>
+                  <label className="block font-semibold text-ink mb-1.5 uppercase text-[10px] tracking-wider text-slate">
+                    Printer Layout Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOptions(o => ({ ...o, layoutMode: 'sheet' }))}
+                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        (options.layoutMode || 'sheet') === 'sheet'
+                          ? 'border-signal bg-signal/10 text-ink ring-1 ring-signal'
+                          : 'border-line bg-card hover:bg-surface text-slate'
+                      }`}
+                    >
+                      <div className="font-semibold text-xs text-ink flex items-center justify-between">
+                        <span>Sheet (A4)</span>
+                        {(options.layoutMode || 'sheet') === 'sheet' && (
+                          <span className="w-2 h-2 rounded-full bg-signal" />
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate mt-0.5 leading-tight">
+                        Multi-sticker grid on A4 paper
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setOptions(o => ({ ...o, layoutMode: 'roll' }))}
+                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        options.layoutMode === 'roll'
+                          ? 'border-signal bg-signal/10 text-ink ring-1 ring-signal'
+                          : 'border-line bg-card hover:bg-surface text-slate'
+                      }`}
+                    >
+                      <div className="font-semibold text-xs text-ink flex items-center justify-between">
+                        <span>Roll / Single</span>
+                        {options.layoutMode === 'roll' && (
+                          <span className="w-2 h-2 rounded-full bg-signal" />
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate mt-0.5 leading-tight">
+                        Continuous thermal roll (1 / page)
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Label Size Preset */}
+                <div>
+                  <label className="block font-semibold text-ink mb-1.5 uppercase text-[10px] tracking-wider text-slate">
+                    Label Size Preset
+                  </label>
+                  <div className="space-y-1.5">
+                    {Object.values(LABEL_PRESETS).map((preset) => {
+                      const isSelected = options.presetId === preset.id;
+                      return (
+                        <label
+                          key={preset.id}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-signal bg-signal/10 text-ink'
+                              : 'border-line bg-card hover:bg-surface/80 text-slate'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="radio"
+                              name="presetId"
+                              checked={isSelected}
+                              onChange={() => setOptions(o => ({ ...o, presetId: preset.id }))}
+                              className="w-3.5 h-3.5 accent-signal text-signal cursor-pointer"
+                            />
+                            <div>
+                              <div className="font-semibold text-ink text-xs">{preset.label}</div>
+                              {preset.id !== 'custom' && (
+                                <div className="text-[10px] text-slate">
+                                  {options.layoutMode === 'roll'
+                                    ? `${preset.widthMm} × ${preset.heightMm} mm (Single label)`
+                                    : `${preset.defaultColumns} cols × ${preset.defaultRows} rows = ${preset.defaultColumns * preset.defaultRows} labels / sheet`}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Custom Size Inputs */}
+                  {options.presetId === 'custom' && (
+                    <div className="mt-3 p-3 bg-surface rounded-lg border border-line grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-slate mb-1">Width (mm)</label>
+                        <input
+                          type="number"
+                          min="20"
+                          max="210"
+                          value={options.customWidthMm}
+                          onChange={(e) => setOptions(o => ({ ...o, customWidthMm: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 bg-card border border-line rounded text-xs font-mono text-ink"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate mb-1">Height (mm)</label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="297"
+                          value={options.customHeightMm}
+                          onChange={(e) => setOptions(o => ({ ...o, customHeightMm: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 bg-card border border-line rounded text-xs font-mono text-ink"
+                        />
                       </div>
                     </div>
-                  </div>
-                  <label className="flex items-center gap-2 pt-1 border-t border-amber-500/20 cursor-pointer">
+                  )}
+                </div>
+
+                {/* Quantity & Sheet Position */}
+                <div className={`grid ${options.layoutMode === 'roll' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+                  <div>
+                    <label className="block font-semibold text-ink mb-1">Copies per serial</label>
                     <input
-                      type="checkbox"
-                      checked={confirmedLargePrint}
-                      onChange={(e) => setConfirmedLargePrint(e.target.checked)}
-                      className="w-3.5 h-3.5 accent-amber-600 rounded cursor-pointer"
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={options.copies}
+                      onChange={(e) => setOptions(o => ({ ...o, copies: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                      className="w-full px-3 py-1.5 bg-card border border-line rounded text-xs font-mono font-medium text-ink"
                     />
-                    <span className="text-[11px] font-medium text-amber-900">
-                      I understand, proceed with this print job
-                    </span>
+                  </div>
+
+                  {options.layoutMode !== 'roll' && (
+                    <div>
+                      <label className="block font-semibold text-ink mb-1" title="Reuse partly used sticker sheets">
+                        Start at position
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={sheetLayout.labelsPerPage || 100}
+                        value={options.startPosition}
+                        onChange={(e) => setOptions(o => ({ ...o, startPosition: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                        className="w-full px-3 py-1.5 bg-card border border-line rounded text-xs font-mono font-medium text-ink"
+                        title="Skips used stickers on the first sheet"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Content Options */}
+                <div>
+                  <label className="block font-semibold text-ink mb-1.5 uppercase text-[10px] tracking-wider text-slate">
+                    Content Options
                   </label>
+                  <div className="space-y-2 p-3 bg-card border border-line rounded-lg">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(options.showQrCode)}
+                        onChange={(e) => setOptions(o => ({ ...o, showQrCode: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-signal text-signal rounded cursor-pointer"
+                      />
+                      <span className="text-xs text-ink font-medium">Include QR Code</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(options.showItemName)}
+                        onChange={(e) => setOptions(o => ({ ...o, showItemName: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-signal text-signal rounded cursor-pointer"
+                      />
+                      <span className="text-xs text-ink font-medium">Include Item Name</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(options.showCutLines)}
+                        onChange={(e) => setOptions(o => ({ ...o, showCutLines: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-signal text-signal rounded cursor-pointer"
+                      />
+                      <span className="text-xs text-ink font-medium">Show Border / Cut Lines</span>
+                    </label>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Right Visual Preview Area */}
-            <div className="lg:col-span-7 p-4 sm:p-5 flex flex-col justify-between bg-slate/5 overflow-hidden">
-              {/* Preview Header & Controls */}
-              <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-line shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-ink">
-                    {`Sheet Preview (${safeCurrentPage + 1} of ${totalPages})`}
-                  </span>
-                  <span className="text-[10px] text-slate px-2 py-0.5 bg-surface rounded border border-line font-mono">
-                    {effectiveLabelWidth} × {effectiveLabelHeight} mm
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
+                {/* Advanced Margins Toggle */}
+                <div>
                   <button
                     type="button"
-                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                    disabled={safeCurrentPage === 0}
-                    className="p-1 rounded border border-line bg-card hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed text-ink"
-                    title="Previous page"
+                    onClick={() => setShowAdvancedMargins(!showAdvancedMargins)}
+                    className="text-signal hover:underline text-[11px] font-medium flex items-center gap-1 cursor-pointer"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>{showAdvancedMargins ? 'Hide Advanced Margins & Gaps' : 'Customize Margins & Spacing'}</span>
                   </button>
-                  <span className="text-xs font-mono text-slate tabular-nums px-1">
-                    {safeCurrentPage + 1} / {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                    disabled={safeCurrentPage >= totalPages - 1}
-                    className="p-1 rounded border border-line bg-card hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed text-ink"
-                    title="Next page"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+
+                  {showAdvancedMargins && (
+                    <div className="mt-2 p-3 bg-card rounded-lg border border-line grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <label className="text-slate block mb-0.5">Top Margin (mm)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="40"
+                          value={options.marginTopMm}
+                          onChange={(e) => setOptions(o => ({ ...o, marginTopMm: e.target.value }))}
+                          className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate block mb-0.5">Left Margin (mm)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="40"
+                          value={options.marginLeftMm}
+                          onChange={(e) => setOptions(o => ({ ...o, marginLeftMm: e.target.value }))}
+                          className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate block mb-0.5">Col Gap X (mm)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={options.gapXMm}
+                          onChange={(e) => setOptions(o => ({ ...o, gapXMm: e.target.value }))}
+                          className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate block mb-0.5">Row Gap Y (mm)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={options.gapYMm}
+                          onChange={(e) => setOptions(o => ({ ...o, gapYMm: e.target.value }))}
+                          className="w-full px-2 py-1 bg-surface border border-line rounded font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Large Print Warning */}
+                {isLargePrintJob && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-900 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-semibold text-xs text-amber-900">Large Print Job Notice</div>
+                        <div className="text-[11px] text-amber-800 leading-normal">
+                          This will print <strong>{printData.totalLabels}</strong> labels over <strong>{totalPages}</strong> {options.layoutMode === 'roll' ? 'labels' : 'sheets'}.
+                        </div>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 pt-1 border-t border-amber-500/20 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={confirmedLargePrint}
+                        onChange={(e) => setConfirmedLargePrint(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-amber-600 rounded cursor-pointer"
+                      />
+                      <span className="text-[11px] font-medium text-amber-900">
+                        I understand, proceed with this print job
+                      </span>
+                    </label>
+                  </div>
+                )}
               </div>
 
-              {/* Live Preview Paper */}
+              {/* Right Visual Preview Area */}
               <div
-                ref={previewContainerRef}
-                className="flex-1 flex items-center justify-center p-2 overflow-auto min-h-[340px]"
+                className="lg:col-span-7 p-4 sm:p-5 flex flex-col justify-between bg-slate/5 overflow-hidden min-h-0"
+                style={{ minHeight: 0 }}
               >
-                {/* Proportional Scaled A4 Sheet Mockup */}
+                {/* Preview Header & Controls */}
+                <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-line shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-ink">
+                      {options.layoutMode === 'roll'
+                        ? `Tag Preview (${safeCurrentPage + 1} of ${totalPages})`
+                        : `Sheet Preview (${safeCurrentPage + 1} of ${totalPages})`}
+                    </span>
+                    <span className="text-[10px] text-slate px-2 py-0.5 bg-surface rounded border border-line font-mono">
+                      {effectiveLabelWidth} × {effectiveLabelHeight} mm
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="secondary"
+                      size="icon-sm"
+                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                      disabled={safeCurrentPage === 0}
+                      title="Previous page"
+                      aria-label="Previous page"
+                      icon={ChevronLeft}
+                    />
+                    <span className="text-xs font-mono text-slate tabular-nums px-1">
+                      {safeCurrentPage + 1} / {totalPages}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="icon-sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                      disabled={safeCurrentPage >= totalPages - 1}
+                      title="Next page"
+                      aria-label="Next page"
+                      icon={ChevronRight}
+                    />
+                  </div>
+                </div>
+
+                {/* Live Preview Paper */}
                 <div
-                  style={{
-                    width: `${targetSheetWidthPx}px`,
-                    height: `${a4HeightPx * sheetScale}px`,
-                    overflow: 'hidden',
-                    position: 'relative'
-                  }}
-                  className="shadow-xl rounded border border-line mx-auto bg-white"
+                  ref={previewContainerRef}
+                  className="flex-1 flex items-center justify-center p-2 overflow-auto min-h-0"
                 >
-                  <div
-                    style={{
-                      width: '210mm',
-                      height: '297mm',
-                      transform: `scale(${sheetScale})`,
-                      transformOrigin: 'top left',
-                      paddingTop: `${effectiveMargins.top}mm`,
-                      paddingBottom: `${effectiveMargins.bottom}mm`,
-                      paddingLeft: `${effectiveMargins.left}mm`,
-                      paddingRight: `${effectiveMargins.right}mm`,
-                      boxSizing: 'border-box'
-                    }}
-                    className="bg-white text-black"
-                  >
+                  {options.layoutMode === 'roll' ? (
+                    /* Roll Mode: Single Label Preview Mockup */
                     <div
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: `repeat(${sheetLayout.columns}, ${effectiveLabelWidth}mm)`,
-                        gridTemplateRows: `repeat(${sheetLayout.rows}, ${effectiveLabelHeight}mm)`,
-                        columnGap: `${effectiveMargins.gapX}mm`,
-                        rowGap: `${effectiveMargins.gapY}mm`
+                        width: `${effectiveLabelWidth * 3.779527 * rollScale}px`,
+                        height: `${effectiveLabelHeight * 3.779527 * rollScale}px`,
+                        overflow: 'hidden',
+                        position: 'relative'
                       }}
+                      className="shadow-xl rounded border border-line mx-auto bg-white"
                     >
-                      {activePageItems.map((item, idx) => (
+                      <div
+                        style={{
+                          width: `${effectiveLabelWidth}mm`,
+                          height: `${effectiveLabelHeight}mm`,
+                          transform: `scale(${rollScale})`,
+                          transformOrigin: 'top left',
+                          boxSizing: 'border-box'
+                        }}
+                        className="bg-white text-black"
+                      >
+                        <LabelCellContent
+                          item={activePageItems[0] || itemsToPrint[0] || {}}
+                          labelWidthMm={effectiveLabelWidth}
+                          labelHeightMm={effectiveLabelHeight}
+                          options={options}
+                          isPrint={false}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Sheet Mode: Proportional Scaled A4 Sheet Mockup */
+                    <div
+                      style={{
+                        width: `${targetSheetWidthPx}px`,
+                        height: `${a4HeightPx * sheetScale}px`,
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}
+                      className="shadow-xl rounded border border-line mx-auto bg-white"
+                    >
+                      <div
+                        style={{
+                          width: '210mm',
+                          height: '297mm',
+                          transform: `scale(${sheetScale})`,
+                          transformOrigin: 'top left',
+                          paddingTop: `${effectiveMargins.top}mm`,
+                          paddingBottom: `${effectiveMargins.bottom}mm`,
+                          paddingLeft: `${effectiveMargins.left}mm`,
+                          paddingRight: `${effectiveMargins.right}mm`,
+                          boxSizing: 'border-box'
+                        }}
+                        className="bg-white text-black"
+                      >
                         <div
-                          key={`sheet-cell-${idx}-${item.serial || 'empty'}`}
                           style={{
-                            width: `${effectiveLabelWidth}mm`,
-                            height: `${effectiveLabelHeight}mm`
+                            display: 'grid',
+                            gridTemplateColumns: `repeat(${sheetLayout.columns}, ${effectiveLabelWidth}mm)`,
+                            gridTemplateRows: `repeat(${sheetLayout.rows}, ${effectiveLabelHeight}mm)`,
+                            columnGap: `${effectiveMargins.gapX}mm`,
+                            rowGap: `${effectiveMargins.gapY}mm`
                           }}
                         >
-                          <LabelCellContent
-                            item={item}
-                            labelWidthMm={effectiveLabelWidth}
-                            labelHeightMm={effectiveLabelHeight}
-                            options={options}
-                            isPrint={false}
-                          />
+                          {activePageItems.map((item, idx) => (
+                            <div
+                              key={`sheet-cell-${idx}-${item.serial || 'empty'}`}
+                              style={{
+                                width: `${effectiveLabelWidth}mm`,
+                                height: `${effectiveLabelHeight}mm`
+                              }}
+                            >
+                              <LabelCellContent
+                                item={item}
+                                labelWidthMm={effectiveLabelWidth}
+                                labelHeightMm={effectiveLabelHeight}
+                                options={options}
+                                isPrint={false}
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
+                  )}
+                </div>
+
+                {/* Status footer inside preview */}
+                <div className="pt-2 text-[11px] text-slate flex items-center justify-between shrink-0">
+                  <div>
+                    {options.layoutMode === 'roll' ? (
+                      <>Roll Mode: <span className="font-semibold text-ink">1</span> label per continuous page</>
+                    ) : (
+                      <>
+                        Calculated: <span className="font-semibold text-ink">{sheetLayout.columns}</span> columns ×{' '}
+                        <span className="font-semibold text-ink">{sheetLayout.rows}</span> rows ({sheetLayout.labelsPerPage} per sheet)
+                      </>
+                    )}
+                  </div>
+                  <div className="text-slate font-mono text-[10px]">
+                    EDL Inventory Label Engine
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Status footer inside preview */}
-              <div className="pt-2 text-[11px] text-slate flex items-center justify-between shrink-0">
-                <div>
-                  Calculated: <span className="font-semibold text-ink">{sheetLayout.columns}</span> columns ×{' '}
-                  <span className="font-semibold text-ink">{sheetLayout.rows}</span> rows ({sheetLayout.labelsPerPage} per sheet)
-                </div>
-                <div className="text-slate font-mono text-[10px]">
-                  EDL Inventory Label Engine
-                </div>
+            {/* Modal Actions Footer - Fixed at bottom, flex: 0 0 auto */}
+            <div
+              className="p-3 sm:p-4 border-t border-line bg-surface/70 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0"
+              style={{ flex: '0 0 auto' }}
+            >
+              <Button
+                variant="secondary"
+                size="regular"
+                onClick={onClose}
+                label="Cancel"
+                className="w-full sm:w-auto"
+              />
+
+              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                <Button
+                  variant="secondary"
+                  size="regular"
+                  onClick={handleDownloadPdf}
+                  icon={FileDown}
+                  label="Save as PDF"
+                  title="Save as PDF via browser print dialog"
+                />
+
+                <Button
+                  variant="primary"
+                  size="regular"
+                  onClick={handlePrint}
+                  disabled={isLargePrintJob && !confirmedLargePrint}
+                  icon={Printer}
+                  label={`Print ${printData.totalLabels} Labels`}
+                />
               </div>
             </div>
           </div>
-
-          {/* Modal Actions Footer */}
-          <div className="p-4 border-t border-line bg-surface/50 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full sm:w-auto px-4 py-2 rounded-lg border border-line bg-card hover:bg-surface text-xs font-medium text-slate hover:text-ink transition-colors"
-            >
-              Cancel
-            </button>
-
-            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                className="px-3.5 py-2 rounded-lg border border-line bg-card hover:bg-surface text-ink text-xs font-medium transition-colors flex items-center gap-1.5"
-                title="Save as PDF via browser print dialog"
-              >
-                <FileDown className="w-4 h-4 text-slate" />
-                <span>Save as PDF</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handlePrint}
-                disabled={isLargePrintJob && !confirmedLargePrint}
-                className="px-5 py-2 rounded-lg bg-ink hover:bg-[#193254] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors shadow-subtle flex items-center gap-2"
-              >
-                <Printer className="w-4 h-4 text-signal" />
-                <span>Print {printData.totalLabels} Labels</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+        </div>,
+        document.body
+      )}
 
       {/* Dedicated Clean Print Portal (rendered directly onto body for window.print) */}
       {createPortal(
@@ -697,7 +964,7 @@ export const PrintLabelsModal = ({
           <style>{`
             @media print {
               @page {
-                size: A4 portrait;
+                size: ${options.layoutMode === 'roll' ? `${effectiveLabelWidth}mm ${effectiveLabelHeight}mm` : 'A4 portrait'};
                 margin: 0;
               }
               body.printing-serial-labels {
@@ -720,9 +987,9 @@ export const PrintLabelsModal = ({
                 color: black !important;
               }
               .print-sheet-page {
-                width: 210mm;
-                height: 297mm;
-                max-height: 297mm;
+                width: ${options.layoutMode === 'roll' ? `${effectiveLabelWidth}mm` : '210mm'};
+                height: ${options.layoutMode === 'roll' ? `${effectiveLabelHeight}mm` : '297mm'};
+                max-height: ${options.layoutMode === 'roll' ? `${effectiveLabelHeight}mm` : '297mm'};
                 page-break-after: always;
                 break-after: page;
                 box-sizing: border-box;
@@ -754,10 +1021,10 @@ export const PrintLabelsModal = ({
               key={`print-sheet-${pageIdx}`}
               className="print-sheet-page"
               style={{
-                paddingTop: `${effectiveMargins.top}mm`,
-                paddingBottom: `${effectiveMargins.bottom}mm`,
-                paddingLeft: `${effectiveMargins.left}mm`,
-                paddingRight: `${effectiveMargins.right}mm`
+                paddingTop: options.layoutMode === 'roll' ? 0 : `${effectiveMargins.top}mm`,
+                paddingBottom: options.layoutMode === 'roll' ? 0 : `${effectiveMargins.bottom}mm`,
+                paddingLeft: options.layoutMode === 'roll' ? 0 : `${effectiveMargins.left}mm`,
+                paddingRight: options.layoutMode === 'roll' ? 0 : `${effectiveMargins.right}mm`
               }}
             >
               <div

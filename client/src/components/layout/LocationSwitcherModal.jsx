@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { sortUnitChildren, buildUnitTree } from '../../utils/unitTree';
+import { Button } from '../common/Button';
 import { 
   X, Search, Globe, Building2, MapPin, Warehouse, 
   ChevronDown, ChevronRight, CheckCircle2 
@@ -145,7 +147,63 @@ export const LocationSwitcherModal = ({ isOpen, onClose }) => {
     return () => { isMounted = false; };
   }, [isOpen, systemUnits]);
 
-  if (!isOpen) return null;
+  const modalRef = useRef(null);
+  const openerRef = useRef(null);
+  const isBackdropMouseDownRef = useRef(false);
+
+  // Lock body scroll and save opener
+  useEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement;
+    const originalOverflow = document.body.style.overflow;
+    const originalPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        const focusableArr = Array.from(focusables).filter(
+          (el) => !el.disabled && el.offsetParent !== null
+        );
+
+        if (focusableArr.length === 0) return;
+
+        const first = focusableArr[0];
+        const last = focusableArr[focusableArr.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      document.body.style.paddingRight = originalPaddingRight;
+      if (openerRef.current && typeof openerRef.current.focus === 'function') {
+        openerRef.current.focus();
+      }
+    };
+  }, [isOpen, onClose]);
 
   const toggleBranch = (branchId) => {
     setExpandedBranches(prev => ({
@@ -161,16 +219,45 @@ export const LocationSwitcherModal = ({ isOpen, onClose }) => {
 
   const isGlobalActive = !selectedUnitId;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+  const handleBackdropMouseDown = (e) => {
+    isBackdropMouseDownRef.current = (e.target === e.currentTarget);
+  };
+
+  const handleBackdropMouseUp = (e) => {
+    if (e.target !== e.currentTarget) {
+      isBackdropMouseDownRef.current = false;
+    }
+  };
+
+  const handleBackdropClick = (e) => {
+    if (isBackdropMouseDownRef.current && e.target === e.currentTarget) {
+      onClose();
+    }
+    isBackdropMouseDownRef.current = false;
+  };
+
+  if (!isOpen) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/60 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="location-switcher-modal-title"
+      onMouseDown={handleBackdropMouseDown}
+      onMouseUp={handleBackdropMouseUp}
+      onClick={handleBackdropClick}
+    >
       <div 
-        className="bg-card border border-line rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-zoom-in text-ink"
+        ref={modalRef}
+        className="bg-card border border-line rounded-xl shadow-modal max-w-lg w-full max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] flex flex-col overflow-hidden m-auto shrink-0 animate-scale-up text-ink"
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-5 py-4 border-b border-line flex items-center justify-between bg-surface/50">
+        <div className="px-5 py-4 border-b border-line flex items-center justify-between bg-surface/50 shrink-0">
           <div>
-            <h3 className="text-sm font-bold text-ink flex items-center gap-2">
+            <h3 id="location-switcher-modal-title" className="text-sm font-bold text-ink flex items-center gap-2">
               <Warehouse className="w-4 h-4 text-signal" />
               <span>Switch Location Context</span>
             </h3>
@@ -178,17 +265,18 @@ export const LocationSwitcherModal = ({ isOpen, onClose }) => {
               Select an operational unit or choose All Units to view system-wide inventory
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
-            className="p-1 rounded-md text-slate hover:text-ink hover:bg-line/40 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            aria-label="Close dialog"
+            title="Close"
+            icon={X}
+          />
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-3 overflow-y-auto flex-1">
+        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
           {/* Search Filter Bar */}
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
@@ -287,15 +375,15 @@ export const LocationSwitcherModal = ({ isOpen, onClose }) => {
           <div className="text-xs text-slate truncate max-w-[280px]">
             Active: <span className="font-semibold text-ink">{selectedUnit ? `${selectedUnit.unit_name} (${selectedUnit.unit_code})` : 'All Units'}</span>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="regular"
             onClick={onClose}
-            className="px-3.5 py-1.5 text-xs font-medium rounded-md border border-line bg-card hover:bg-surface text-ink transition-colors"
-          >
-            Close
-          </button>
+            label="Close"
+          />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

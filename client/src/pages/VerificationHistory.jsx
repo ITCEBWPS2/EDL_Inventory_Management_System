@@ -8,6 +8,9 @@ import { BackButton } from '../components/common/BackButton';
 import { formatDate, exportToCSV } from '../utils/formatters';
 import { SerialNumberCell } from '../components/verification/SerialNumberCell';
 import { Download, Printer, Plus, ChevronDown } from 'lucide-react';
+import { PrintHeader } from '../components/common/PrintHeader';
+import { AddButton } from '../components/ui/AddButton';
+import { ExportButton } from '../components/ui/ExportButton';
 
 export const VerificationHistory = () => {
   const { selectedUnitId, selectedUnit, canWrite } = useAuth();
@@ -16,7 +19,6 @@ export const VerificationHistory = () => {
   const [historyItems, setHistoryItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState('2026');
-  const [includeNotCounted, setIncludeNotCounted] = useState(false);
   const [expandedRemarks, setExpandedRemarks] = useState({});
   const [expandedLabels, setExpandedLabels] = useState({});
 
@@ -41,7 +43,6 @@ export const VerificationHistory = () => {
       const params = {};
       if (selectedUnitId) params.unit_id = selectedUnitId;
       if (selectedYear && selectedYear !== 'All') params.year = selectedYear;
-      if (includeNotCounted) params.include_not_counted = true;
 
       // Primary: query flattened verified history items endpoint
       const res = await api.get('/verifications/history-items', params);
@@ -93,7 +94,7 @@ export const VerificationHistory = () => {
 
                 const hasEnteredData = hasPhys || hasCondition || hasDisp || hasLabel || hasRemarks || isCountedStatus;
 
-                if (!hasEnteredData && !includeNotCounted) {
+                if (!hasEnteredData) {
                   return;
                 }
 
@@ -148,7 +149,7 @@ export const VerificationHistory = () => {
 
   useEffect(() => {
     fetchHistory();
-  }, [selectedUnitId, selectedYear, includeNotCounted]);
+  }, [selectedUnitId, selectedYear]);
 
   // Distinct years available for dropdown
   const availableYears = useMemo(() => {
@@ -221,66 +222,48 @@ export const VerificationHistory = () => {
         { label: 'Verification History' }
       ]}
     >
-      {/* Printable Report Header */}
-      <div className="hidden print:block mb-6">
-        <div className="border-b-2 border-ink pb-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-xl font-bold text-ink uppercase tracking-wide">
-                Electricity Distribution Lanka (Pvt) Ltd
-              </h1>
-              <p className="text-sm font-semibold text-slate mt-0.5">
-                Annual Board of Survey — Verification History Archive
-              </p>
-            </div>
-            <div className="text-right text-xs font-mono text-slate">
-              <div>EDL-IMS AUDIT FORM 04-H</div>
-              <div>Cycle Year: {selectedYear}</div>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4 mt-4 text-xs">
-            <div>
-              <span className="font-bold text-slate uppercase block">Location</span>
-              <span className="font-semibold text-ink">{selectedUnit ? selectedUnit.unit_name : 'All Monitored Units'}</span>
-            </div>
-            <div>
-              <span className="font-bold text-slate uppercase block">Report Archive Date</span>
-              <span className="font-semibold text-ink">{formatDate(new Date())}</span>
-            </div>
-            <div>
-              <span className="font-bold text-slate uppercase block">Records Listed</span>
-              <span className="font-semibold text-ink">{displayItems.length} records</span>
-            </div>
-          </div>
+      <div className="print-landscape">
+        {/* Printable Report Header */}
+        <div className="hidden print:block mb-4">
+          <PrintHeader
+            reportTitle="Annual Verification History Archive"
+            subtitle="Annual Board of Survey"
+            filtersSummary={`Cycle Year: ${selectedYear} • Listed Records: ${displayItems.length}`}
+            extraInfo={
+              <div className="flex justify-between text-[11px]">
+                <span><strong className="text-black">Form:</strong> EDL-IMS AUDIT FORM 04-H</span>
+                <span><strong className="text-black">Cycle Year:</strong> {selectedYear}</span>
+              </div>
+            }
+          />
         </div>
-      </div>
 
-      {/* Header bar */}
+      {/* Header bar with Export, Print, and Add action buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 no-print">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-ink tracking-tight">Verification History</h1>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate/10 text-slate font-medium">
-              Audit Archives
-            </span>
-          </div>
-          <p className="text-xs text-slate mt-0.5">
-            Archival record of finalized Annual Board of Survey verifications for{' '}
-            <span className="font-semibold text-ink">
-              {selectedUnit ? selectedUnit.unit_name : 'all monitored distribution units'}
-            </span>
-          </p>
+          <h1 className="text-xl font-semibold text-ink tracking-tight">Verification History</h1>
         </div>
 
-        {canWrite && (
-          <Link
-            to="/verification/new"
-            className="px-4 py-2 bg-ink hover:bg-[#193254] text-white text-xs font-semibold rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4 text-signal" />
-            <span>Start New Survey</span>
-          </Link>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButton
+            onClick={handleExport}
+            label="Export CSV"
+            title="Export verification records as CSV"
+          />
+          <ExportButton
+            format="print"
+            label="Print Report"
+            onClick={() => window.print()}
+            title="Print Landscape Verification Archive"
+          />
+          {canWrite && (
+            <AddButton
+              to="/verification/new"
+              id="btn-start-new-survey"
+              label="Start New Survey"
+            />
+          )}
+        </div>
       </div>
 
       {/* Top Filter and Action Bar */}
@@ -302,84 +285,49 @@ export const VerificationHistory = () => {
             <ChevronDown className="w-3.5 h-3.5 text-slate absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Toggle for uncounted items */}
-          <label className="inline-flex items-center gap-2 text-xs text-slate cursor-pointer select-none bg-card border border-line px-3 py-2 rounded-lg shadow-subtle hover:bg-surface transition-colors">
-            <input
-              type="checkbox"
-              id="toggle-include-not-counted"
-              checked={includeNotCounted}
-              onChange={(e) => setIncludeNotCounted(e.target.checked)}
-              className="rounded border-line text-signal focus:ring-signal/30 w-3.5 h-3.5 cursor-pointer accent-signal"
-            />
-            <span className="font-medium text-ink">Include not counted items</span>
-          </label>
-
           {/* Record count badge: black pill badge with white text */}
           <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-ink text-white shadow-xs">
             {displayItems.length} records
           </span>
-        </div>
-
-        {/* Right: Export and Print buttons */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExport}
-            className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-semibold rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
-            title="Export verification records as CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-signal" />
-            <span>Export</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="px-3.5 py-2 bg-card hover:bg-surface border border-line text-ink text-xs font-semibold rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 cursor-pointer"
-            title="Print Landscape Verification Archive"
-          >
-            <Printer className="w-3.5 h-3.5 text-signal" />
-            <span>Print</span>
-          </button>
         </div>
       </div>
 
       {/* Table: Plain table with table-fixed layout and controlled remarks wrapping */}
       <div className="bg-card border border-line rounded-xl shadow-card overflow-hidden">
         <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[340px] overflow-y-auto">
-          <table className="min-w-full text-left text-xs text-ink border-collapse table-fixed print:table-auto print:min-w-0" style={{ minWidth: '2000px' }}>
+          <table className="min-w-full text-left text-xs text-ink border-collapse table-fixed print:table-auto print:min-w-0" style={{ minWidth: '2066px', tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: '48px' }} />
-              <col style={{ width: '64px' }} />
-              <col style={{ width: '400px' }} />
-              <col style={{ width: '200px' }} />
-              <col style={{ width: '110px' }} />
-              <col style={{ width: '160px' }} />
-              <col style={{ width: '90px' }} />
-              <col style={{ width: '80px' }} />
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '105px' }} />
-              <col style={{ width: '125px' }} />
-              <col style={{ width: '280px' }} />
-              <col style={{ width: '140px' }} />
+              <col style={{ width: '56px', minWidth: '56px' }} />
+              <col style={{ width: '70px', minWidth: '70px' }} />
+              <col style={{ width: '380px', minWidth: '380px' }} />
+              <col style={{ width: '190px', minWidth: '190px' }} />
+              <col style={{ width: '120px', minWidth: '120px' }} />
+              <col style={{ width: '190px', minWidth: '190px' }} />
+              <col style={{ width: '100px', minWidth: '100px' }} />
+              <col style={{ width: '90px', minWidth: '90px' }} />
+              <col style={{ width: '110px', minWidth: '110px' }} />
+              <col style={{ width: '120px', minWidth: '120px' }} />
+              <col style={{ width: '100px', minWidth: '100px' }} />
+              <col style={{ width: '140px', minWidth: '140px' }} />
+              <col style={{ width: '240px', minWidth: '240px' }} />
+              <col style={{ width: '150px', minWidth: '150px' }} />
             </colgroup>
-            <thead className="sticky top-0 z-20 bg-surface border-b border-line shadow-xs">
-              <tr className="border-b border-line bg-surface/95 backdrop-blur-xs font-semibold text-slate uppercase tracking-wider text-[10px]">
-                <th className="py-2.5 px-3 w-12 min-w-[48px] max-w-[48px] text-center">No</th>
-                <th className="py-2.5 px-3 w-16 min-w-[64px] max-w-[64px] text-center whitespace-nowrap">Year</th>
-                <th className="py-2.5 px-3 min-w-[400px] w-[400px] max-w-[400px] whitespace-nowrap border-r border-line/60">Serial No.</th>
-                <th className="py-2.5 px-4 w-[200px] min-w-[170px] max-w-[240px]">Item</th>
-                <th className="py-2.5 px-3 w-[110px] min-w-[100px] max-w-[120px] whitespace-nowrap">Verification Date</th>
-                <th className="py-2.5 px-4 w-[160px] min-w-[140px] max-w-[200px] whitespace-nowrap">Verified By</th>
-                <th className="py-2.5 px-3 w-[90px] min-w-[85px] max-w-[100px] text-center whitespace-nowrap">In Inventory</th>
-                <th className="py-2.5 px-3 w-[80px] min-w-[75px] max-w-[90px] text-center whitespace-nowrap">System Qty</th>
-                <th className="py-2.5 px-3 w-[100px] min-w-[90px] max-w-[115px] text-center whitespace-nowrap">Physical Available</th>
-                <th className="py-2.5 px-3 w-[100px] min-w-[90px] max-w-[115px] text-center whitespace-nowrap">Physical Not Available</th>
-                <th className="py-2.5 px-3 w-[105px] min-w-[95px] max-w-[115px] text-center whitespace-nowrap">Condition</th>
-                <th className="py-2.5 px-3 w-[125px] min-w-[115px] max-w-[140px] text-center whitespace-nowrap">Issued / Destroyed</th>
-                <th className="py-2.5 px-4 w-[280px] min-w-[220px] max-w-[320px] text-left">Special Remarks</th>
-                <th className="py-2.5 px-3 w-[140px] min-w-[110px] max-w-[220px] text-center whitespace-nowrap">Label No</th>
+            <thead className="sticky top-0 z-20 bg-white border-b border-line shadow-xs">
+              <tr className="border-b border-line bg-white font-semibold text-slate uppercase tracking-wider text-[11px]">
+                <th className="w-[56px] min-w-[56px] text-center" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>No.</th>
+                <th className="w-[70px] min-w-[70px] text-center" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Year</th>
+                <th className="w-[380px] min-w-[380px] text-left border-r border-line/60" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Serial No.</th>
+                <th className="w-[190px] min-w-[190px] text-left" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Item</th>
+                <th className="w-[120px] min-w-[120px] text-left" title="Verification Date" aria-label="Verification Date" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Verification<br />Date</th>
+                <th className="w-[190px] min-w-[190px] text-left" title="Verified By" aria-label="Verified By" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Verified<br />By</th>
+                <th className="w-[100px] min-w-[100px] text-center" title="In Inventory" aria-label="In Inventory" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>In<br />Inventory</th>
+                <th className="w-[90px] min-w-[90px] text-center" title="System Qty" aria-label="System Qty" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>System<br />Qty</th>
+                <th className="w-[110px] min-w-[110px] text-center" title="Physical Available" aria-label="Physical Available" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Physical<br />Available</th>
+                <th className="w-[120px] min-w-[120px] text-center" title="Physical Not Available" aria-label="Physical Not Available" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Physical Not<br />Available</th>
+                <th className="w-[100px] min-w-[100px] text-center" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
+                <th className="w-[140px] min-w-[140px] text-center" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
+                <th className="w-[240px] min-w-[240px] text-left" title="Special Remarks" aria-label="Special Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Special Remarks</th>
+                <th className="w-[150px] min-w-[150px] text-center" title="Label No." aria-label="Label No." style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/60">
@@ -455,17 +403,17 @@ export const VerificationHistory = () => {
 
                       <tr className="hover:bg-surface/50 transition-colors group">
                         {/* 1. No */}
-                        <td className="py-2 px-3 text-center text-slate font-mono font-medium align-top w-12 min-w-[48px] max-w-[48px]">
+                        <td className="py-2 px-3 text-center text-slate font-mono font-medium align-top w-[56px] min-w-[56px]">
                           {idx + 1}
                         </td>
 
                         {/* 2. Year */}
-                        <td className="py-2 px-3 font-mono font-bold text-ink text-center whitespace-nowrap align-top w-16 min-w-[64px] max-w-[64px]">
+                        <td className="py-2 px-3 font-mono font-bold text-ink text-center whitespace-nowrap align-top w-[70px] min-w-[70px]">
                           {item.year}
                         </td>
 
-                        {/* 3. Serial No. (min-w-[400px], single line per serial, collapse for batches) */}
-                        <td className="py-2 px-3 min-w-[400px] w-[400px] max-w-[400px] align-top border-r border-line/60">
+                        {/* 3. Serial No. (min-w-[380px], single line per serial, collapse for batches) */}
+                        <td className="py-2 px-3 min-w-[380px] w-[380px] align-top border-r border-line/60">
                           <SerialNumberCell
                             serialNumbers={item.serial_numbers}
                             manufacturerSerialNumbers={item.manufacturer_serial_numbers}
@@ -476,7 +424,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 4. Item */}
-                        <td className="py-2 px-4 w-[200px] min-w-[170px] max-w-[240px] font-semibold text-ink leading-snug align-top whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                        <td className="py-2 px-4 w-[190px] min-w-[190px] font-semibold text-ink leading-snug align-top whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">
                           <div className="whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">{item.item_name}</div>
                           {item.category && (
                             <div className="text-[10px] text-slate font-normal mt-0.5 whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">{item.category}</div>
@@ -484,17 +432,17 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 5. Verification Date */}
-                        <td className="py-2 px-3 w-[110px] min-w-[100px] max-w-[120px] font-mono text-slate whitespace-nowrap align-top">
+                        <td className="py-2 px-3 w-[120px] min-w-[120px] font-mono text-slate whitespace-nowrap align-top">
                           {formatDate(item.date)}
                         </td>
 
                         {/* 6. Verified By */}
-                        <td className="py-2 px-4 w-[160px] min-w-[140px] max-w-[200px] text-slate leading-snug align-top whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                        <td className="py-2 px-4 w-[190px] min-w-[190px] text-slate leading-snug align-top whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word]">
                           {item.verified_by || '—'}
                         </td>
 
                         {/* 7. In Inventory */}
-                        <td className="py-2 px-3 w-[90px] min-w-[85px] max-w-[100px] text-center whitespace-nowrap align-top">
+                        <td className="py-2 px-3 w-[100px] min-w-[100px] text-center whitespace-nowrap align-top">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             item.in_inventory !== false ? 'bg-ink text-white' : 'bg-slate/20 text-slate'
                           }`}>
@@ -503,12 +451,12 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 8. System Qty */}
-                        <td className="py-2 px-3 w-[80px] min-w-[75px] max-w-[90px] text-center font-bold text-ink font-mono text-sm align-top whitespace-nowrap">
+                        <td className="py-2 px-3 w-[90px] min-w-[90px] text-center font-bold text-ink font-mono text-sm align-top whitespace-nowrap">
                           {item.system_qty}
                         </td>
 
                         {/* 9. Physical Available */}
-                        <td className="py-2 px-3 w-[100px] min-w-[90px] max-w-[115px] text-center align-top whitespace-nowrap">
+                        <td className="py-2 px-3 w-[110px] min-w-[110px] text-center align-top whitespace-nowrap">
                           {hasPhysAvail ? (
                             <div>
                               <span className="font-mono font-bold text-[#2F7A5C] text-sm">
@@ -526,7 +474,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 10. Physical Not Available */}
-                        <td className="py-2 px-3 w-[100px] min-w-[90px] max-w-[115px] text-center font-mono font-bold text-sm align-top whitespace-nowrap">
+                        <td className="py-2 px-3 w-[120px] min-w-[120px] text-center font-mono font-bold text-sm align-top whitespace-nowrap">
                           {hasPhysNotAvail ? (
                             <span className={isNotAvailPos ? 'text-[#B4483A]' : 'text-slate'}>
                               {item.physical_not_available}
@@ -537,7 +485,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 11. Condition */}
-                        <td className="py-2 px-3 w-[105px] min-w-[95px] max-w-[115px] text-center whitespace-nowrap align-top">
+                        <td className="py-2 px-3 w-[100px] min-w-[100px] text-center whitespace-nowrap align-top">
                           {!item.is_counted && item.status === 'Not counted' ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium border border-line text-slate bg-surface">
                               Not counted
@@ -564,7 +512,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 12. Issued / Destroyed */}
-                        <td className="py-2 px-3 w-[125px] min-w-[115px] max-w-[140px] text-center whitespace-nowrap align-top">
+                        <td className="py-2 px-3 w-[140px] min-w-[140px] text-center whitespace-nowrap align-top">
                           {dispStr === 'issued' ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/50 text-emerald-700 bg-emerald-50/40">
                               Issued{item.issued_destroyed_qty > 1 ? ` × ${item.issued_destroyed_qty}` : ''}
@@ -583,7 +531,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 13. Special Remarks (wrapped downward, sans-serif, max 3 lines with Show more / Show less) */}
-                        <td className="py-2.5 px-4 w-[280px] min-w-[220px] max-w-[320px] align-top text-slate text-xs font-sans whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word] leading-[1.4]">
+                        <td className="py-2.5 px-4 w-[240px] min-w-[240px] align-top text-slate text-xs font-sans whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word] leading-[1.4]">
                           {item.remarks && item.remarks !== '—' && item.remarks.trim() !== '' ? (
                             <div className="w-full">
                               <div
@@ -613,7 +561,7 @@ export const VerificationHistory = () => {
                         </td>
 
                         {/* 14. Label No (wrapped downward when long, sans-serif; monospace when short <= 24 chars) */}
-                        <td className={`py-2 px-3 align-top ${isLongLabel ? 'text-left w-[140px] min-w-[110px] max-w-[220px]' : 'text-center w-[140px] min-w-[100px] max-w-[140px]'}`}>
+                        <td className={`py-2 px-3 align-top w-[150px] min-w-[150px] ${isLongLabel ? 'text-left' : 'text-center'}`}>
                           {labelStr ? (
                             isLongLabel ? (
                               <div className="w-full text-left font-sans text-xs text-ink whitespace-normal break-words [overflow-wrap:anywhere] [word-break:break-word] leading-[1.4]">
@@ -655,6 +603,7 @@ export const VerificationHistory = () => {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
 
       {/* Bottom Back Button */}

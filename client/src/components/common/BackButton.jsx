@@ -21,7 +21,7 @@ export const BackButton = ({ to, onClick, label = 'Back', className = '', id = '
     </>
   );
 
-  const baseClasses = "inline-flex items-center gap-1.5 text-xs text-slate hover:text-ink transition-colors font-medium group select-none";
+  const baseClasses = "inline-flex items-center gap-1.5 text-xs text-[#7a1a3c] hover:text-[#5a1230] hover:underline transition-colors font-semibold group select-none";
 
   if (to) {
     return (

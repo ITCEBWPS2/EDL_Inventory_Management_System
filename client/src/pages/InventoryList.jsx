@@ -13,7 +13,7 @@ import { isBatchItem } from '../utils/serialNumberGenerator';
 import { ChevronRight } from 'lucide-react';
 
 export const InventoryList = () => {
-  const { user, selectedUnitId, selectedUnit, canWrite } = useAuth();
+  const { user, selectedUnitId, selectedUnit, canWrite, can } = useAuth();
   const toast = useToast();
   const [searchParams] = useSearchParams();
 
@@ -186,6 +186,8 @@ export const InventoryList = () => {
       header: 'Serial No.',
       accessor: 'item_code',
       tabular: true,
+      width: 400,
+      minWidth: 400,
       render: (row, _idx, meta) => {
         const isBatch = isBatchItem(row);
         if (isBatch) {
@@ -220,7 +222,7 @@ export const InventoryList = () => {
           );
         }
         return (
-          <span className="font-mono font-semibold text-ink text-xs">{row.item_code}</span>
+          <span className="font-mono font-semibold text-ink text-xs whitespace-nowrap">{row.item_code}</span>
         );
       }
     },
@@ -228,13 +230,15 @@ export const InventoryList = () => {
       header: 'Manufacturer S/N',
       accessor: 'serial_number',
       tabular: true,
+      width: 150,
+      minWidth: 150,
       render: (row) => {
         const isBatch = isBatchItem(row);
         if (isBatch) {
           return <span className="text-slate text-xs font-mono select-none">—</span>;
         }
         return (
-          <span className="font-mono text-ink text-xs">
+          <span className="font-mono text-ink text-xs whitespace-nowrap">
             {row.serial_number?.trim() ? row.serial_number : '—'}
           </span>
         );
@@ -243,9 +247,11 @@ export const InventoryList = () => {
     {
       header: 'Item Description',
       accessor: 'item_name',
+      width: 220,
+      minWidth: 220,
       render: (row) => (
         <div>
-          <div className="font-medium text-ink">{row.item_name}</div>
+          <div className="font-medium text-ink line-clamp-3">{row.item_name}</div>
           {row.serial_number && (
             <div className="text-[10px] text-slate font-mono">SN: {row.serial_number}</div>
           )}
@@ -254,13 +260,17 @@ export const InventoryList = () => {
     },
     {
       header: 'Category',
-      accessor: 'category'
+      accessor: 'category',
+      width: 170,
+      minWidth: 170
     },
     {
       header: 'Quantity',
       accessor: 'quantity',
       tabular: true,
       align: 'right',
+      width: 90,
+      minWidth: 90,
       render: (row) => (
         <span className="font-semibold text-ink tabular-nums">{formatNumber(row.quantity)}</span>
       )
@@ -268,6 +278,8 @@ export const InventoryList = () => {
     {
       header: 'Unit / Location',
       accessor: 'unit_name',
+      width: 120,
+      minWidth: 120,
       render: (row) => (
         <span className="text-slate text-[11px]">{row.unit_name}</span>
       )
@@ -275,6 +287,8 @@ export const InventoryList = () => {
     {
       header: 'Stock Status',
       accessor: 'status',
+      width: 110,
+      minWidth: 110,
       render: (row) => <StatusBadge status={row.status} />
     }
   ];
@@ -295,9 +309,9 @@ export const InventoryList = () => {
         columns={columns}
         data={items}
         loading={loading}
-        onAdd={canWrite ? handleOpenAdd : null}
-        onEdit={canWrite ? handleOpenEdit : null}
-        onDelete={canWrite ? handleDelete : null}
+        onAdd={can('add_inventory') ? handleOpenAdd : null}
+        onEdit={can('update_inventory') ? handleOpenEdit : null}
+        onDelete={can('delete_inventory') ? handleDelete : null}
         addLabel="Add Item"
         renderExpandedRow={(row) => <BatchSerialSubTable item={row} />}
         isRowExpandable={(row) => isBatchItem(row)}

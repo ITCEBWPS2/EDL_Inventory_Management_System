@@ -2,8 +2,15 @@ const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const db = require('../services/db');
 const { Profile } = require('../models');
+const auditLogger = require('../services/auditLogger');
+const {
+  EMAIL_REGEX,
+  validateEmail,
+  validateUsername,
+  normalizeIdentifier
+} = require('../utils/authValidation');
 
-const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const escapeRegex = (s) => String(s).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 
 const userController = {
   async getAllUsers(req, res) {
@@ -66,11 +73,12 @@ const userController = {
         });
       }
 
-      const normalizedEmail = String(email).trim().toLowerCase();
-      if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.includes('..')) {
+      const normalizedEmail = normalizeIdentifier(email);
+      const emailErr = validateEmail(normalizedEmail);
+      if (emailErr) {
         return res.status(400).json({
           success: false,
-          message: 'Please enter a valid email address.'
+          message: emailErr
         });
       }
 
@@ -82,48 +90,60 @@ const userController = {
         });
       }
 
-      // Enforce exactly ONE unit assignment
+      // Enforce unit assignment (optional for disposal_only)
+      const isDisposalOnly = role === 'employee' && permission_level === 'disposal_only';
       let selectedUnitId = null;
       if (unit_id) {
         selectedUnitId = unit_id;
       } else if (Array.isArray(unit_ids)) {
-        if (unit_ids.length !== 1) {
+        if (unit_ids.length > 1) {
           return res.status(400).json({
             success: false,
-            message: 'Each user must be assigned to exactly one unit.'
+            message: 'Each user must be assigned to at most one unit.'
           });
         }
-        selectedUnitId = unit_ids[0];
+        selectedUnitId = unit_ids[0] || null;
       } else if (typeof unit_ids === 'string') {
         selectedUnitId = unit_ids;
       }
 
-      if (!selectedUnitId) {
+      if (!selectedUnitId && !isDisposalOnly) {
         return res.status(400).json({
           success: false,
           message: 'Each user must be assigned to exactly one unit.'
         });
       }
 
-      const allUnits = await db.getUnits();
-      const targetUnit = allUnits.find(u => u.id === selectedUnitId);
-      if (!targetUnit) {
+      let targetUnit = null;
+      if (selectedUnitId) {
+        const allUnits = await db.getUnits();
+        targetUnit = allUnits.find(u => u.id === selectedUnitId);
+        if (!targetUnit) {
+          return res.status(400).json({
+            success: false,
+            message: 'The selected unit does not exist.'
+          });
+        }
+
+        // Branch nodes (unit_type === 'area') are structural only and cannot be assigned
+        if (targetUnit.unit_type === 'area') {
+          return res.status(400).json({
+            success: false,
+            message: 'Branch and area nodes are structural only and cannot be assigned to users. Please select an operational unit or CSC.'
+          });
+        }
+      }
+
+      const normalizedUsername = normalizeIdentifier(username);
+      const usernameErr = validateUsername(normalizedUsername);
+      if (usernameErr) {
         return res.status(400).json({
           success: false,
-          message: 'The selected unit does not exist.'
+          message: usernameErr
         });
       }
 
-      // Branch nodes (unit_type === 'area') are structural only and cannot be assigned
-      if (targetUnit.unit_type === 'area') {
-        return res.status(400).json({
-          success: false,
-          message: 'Branch and area nodes are structural only and cannot be assigned to users. Please select an operational unit or CSC.'
-        });
-      }
-
-
-      const existing = await db.getProfileByUsername(username);
+      const existing = await db.getProfileByUsername(normalizedUsername);
       if (existing) {
         return res.status(400).json({
           success: false,
@@ -132,11 +152,11 @@ const userController = {
       }
 
       // Permission level rules:
-      // Only employee role uses permission_level: 'read_write', 'read_only', 'no_permission'
+      // Only employee role uses permission_level: 'read_write', 'read_only', 'no_permission', 'disposal_only'
       // Non-employee roles (super_admin, local_admin, unit_head) must have permission_level: null
       let assignedPermission = null;
       if (role === 'employee') {
-        const validPerms = ['read_write', 'read_only', 'no_permission'];
+        const validPerms = ['read_write', 'read_only', 'no_permission', 'disposal_only'];
         assignedPermission = validPerms.includes(permission_level) ? permission_level : 'read_write';
       }
 
@@ -161,15 +181,33 @@ const userController = {
         password_hash
       }, req.user.role);
 
-      // Strictly write exactly ONE row in user_units
-      await db.setUserUnits(newId, [selectedUnitId]);
+      // Write unit assignment if provided (optional for disposal_only)
+      if (selectedUnitId) {
+        await db.setUserUnits(newId, [selectedUnitId]);
+      } else {
+        await db.setUserUnits(newId, []);
+      }
+
+      await auditLogger.log({
+        action: 'CREATE',
+        module: 'Users',
+        status: 'success',
+        entity_type: 'User',
+        entity_id: newId,
+        entity_reference: profile.username,
+        unit_id: selectedUnitId,
+        description: `${req.user.full_name} (${req.user.role}) created user account '${profile.username}' (${profile.role})`,
+        changes: auditLogger.snapshot(profile),
+        req,
+        res
+      });
 
       return res.status(201).json({
         success: true,
         message: 'User created successfully.',
         data: {
           ...profile,
-          units: [targetUnit]
+          units: targetUnit ? [targetUnit] : []
         }
       });
     } catch (error) {
@@ -207,18 +245,22 @@ const userController = {
       }
 
       // Validate single unit assignment if unit change requested
+      const finalRole = role !== undefined ? role : profile.role;
+      const finalPerm = permission_level !== undefined ? permission_level : profile.permission_level;
+      const isDisposalOnly = finalRole === 'employee' && finalPerm === 'disposal_only';
+
       let selectedUnitId = undefined;
       if (unit_id !== undefined) {
         selectedUnitId = unit_id;
       } else if (unit_ids !== undefined) {
         if (Array.isArray(unit_ids)) {
-          if (unit_ids.length !== 1) {
+          if (unit_ids.length > 1) {
             return res.status(400).json({
               success: false,
-              message: 'Each user must be assigned to exactly one unit.'
+              message: 'Each user must be assigned to at most one unit.'
             });
           }
-          selectedUnitId = unit_ids[0];
+          selectedUnitId = unit_ids[0] || null;
         } else if (typeof unit_ids === 'string') {
           selectedUnitId = unit_ids;
         }
@@ -226,31 +268,34 @@ const userController = {
 
       if (selectedUnitId !== undefined) {
         if (!selectedUnitId) {
-          return res.status(400).json({
-            success: false,
-            message: 'Each user must be assigned to exactly one unit.'
-          });
+          if (!isDisposalOnly) {
+            return res.status(400).json({
+              success: false,
+              message: 'Each user must be assigned to exactly one unit.'
+            });
+          }
+          // For disposal_only, empty unit clears unit assignment (handles all units)
+          await db.setUserUnits(id, []);
+        } else {
+          const allUnits = await db.getUnits();
+          const targetUnit = allUnits.find(u => u.id === selectedUnitId);
+          if (!targetUnit) {
+            return res.status(400).json({
+              success: false,
+              message: 'The selected unit does not exist.'
+            });
+          }
+
+          if (targetUnit.unit_type === 'area') {
+            return res.status(400).json({
+              success: false,
+              message: 'Branch and area nodes are structural only and cannot be assigned to users. Please select an operational unit or CSC.'
+            });
+          }
+
+          // Replace the existing unit assignment with the single new unit
+          await db.setUserUnits(id, [selectedUnitId]);
         }
-
-        const allUnits = await db.getUnits();
-        const targetUnit = allUnits.find(u => u.id === selectedUnitId);
-        if (!targetUnit) {
-          return res.status(400).json({
-            success: false,
-            message: 'The selected unit does not exist.'
-          });
-        }
-
-        if (targetUnit.unit_type === 'area') {
-          return res.status(400).json({
-            success: false,
-            message: 'Branch and area nodes are structural only and cannot be assigned to users. Please select an operational unit or CSC.'
-          });
-        }
-
-
-        // Replace the existing unit assignment with the single new unit
-        await db.setUserUnits(id, [selectedUnitId]);
       }
 
       const updates = {};
@@ -261,14 +306,17 @@ const userController = {
             message: 'Email address is required.'
           });
         }
-        const normalizedEmail = String(email).trim().toLowerCase();
-        if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.includes('..')) {
+        const normalizedEmail = normalizeIdentifier(email);
+        const emailErr = validateEmail(normalizedEmail);
+        if (emailErr) {
           return res.status(400).json({
             success: false,
-            message: 'Please enter a valid email address.'
+            message: emailErr
           });
         }
-        const existingWithEmail = await Profile.findOne({ email: normalizedEmail, id: { $ne: id } }).lean();
+        const existingWithEmail = await Profile.findOne({ email: normalizedEmail, id: { $ne: id } })
+          .collation({ locale: 'en', strength: 2 }).lean() ||
+          await Profile.findOne({ email: new RegExp(`^${escapeRegex(normalizedEmail)}$`, 'i'), id: { $ne: id } }).lean();
         if (existingWithEmail) {
           return res.status(400).json({
             success: false,
@@ -286,10 +334,9 @@ const userController = {
       if (full_name !== undefined) updates.full_name = full_name;
       if (role !== undefined) updates.role = role;
       
-      const finalRole = role !== undefined ? role : profile.role;
       if (finalRole === 'employee') {
         if (permission_level !== undefined) {
-          const validPerms = ['read_write', 'read_only', 'no_permission'];
+          const validPerms = ['read_write', 'read_only', 'no_permission', 'disposal_only'];
           updates.permission_level = validPerms.includes(permission_level) ? permission_level : 'read_write';
         }
       } else {
@@ -299,10 +346,25 @@ const userController = {
       if (contact_info !== undefined) updates.contact_info = contact_info;
       if (account_status !== undefined) updates.account_status = account_status;
 
+      const existing = await db.getProfileById(id);
       const updated = await db.updateProfile(id, updates, req.user.role);
 
       const allUnits = await db.getUnits();
       const assignedUnitIds = await db.getUserUnits(id);
+
+      await auditLogger.log({
+        action: 'UPDATE',
+        module: 'Users',
+        status: 'success',
+        entity_type: 'User',
+        entity_id: id,
+        entity_reference: updated.username,
+        unit_id: assignedUnitIds[0] || null,
+        description: `${req.user.full_name} (${req.user.role}) updated user account '${updated.username}'`,
+        changes: auditLogger.diff(existing, updated),
+        req,
+        res
+      });
 
       return res.json({
         success: true,
@@ -342,6 +404,18 @@ const userController = {
 
       const newStatus = profile.account_status === 'active' ? 'inactive' : 'active';
       const updated = await db.updateProfile(id, { account_status: newStatus }, req.user.role);
+
+      await auditLogger.log({
+        action: newStatus === 'active' ? 'ACTIVATE' : 'DEACTIVATE',
+        module: 'Users',
+        status: 'success',
+        entity_type: 'User',
+        entity_id: id,
+        entity_reference: profile.username,
+        description: `${req.user.full_name} (${req.user.role}) changed account status of '${profile.username}' to ${newStatus}`,
+        req,
+        res
+      });
 
       return res.json({
         success: true,
@@ -396,6 +470,19 @@ const userController = {
 
       // Delete profile and remove user_units assignments in the same operation
       await db.deleteProfile(id);
+
+      await auditLogger.log({
+        action: 'DELETE',
+        module: 'Users',
+        status: 'success',
+        entity_type: 'User',
+        entity_id: id,
+        entity_reference: profile.username,
+        description: `${req.user.full_name} (${req.user.role}) deleted user account '${profile.username}'`,
+        changes: auditLogger.snapshot(profile),
+        req,
+        res
+      });
 
       return res.json({
         success: true,

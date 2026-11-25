@@ -7,8 +7,12 @@ import { DataTable } from '../components/common/DataTable';
 import { RecordModal } from '../components/common/RecordModal';
 import { ConfirmModal } from '../components/common/ConfirmModal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatDate } from '../utils/formatters';
+import { AddButton } from '../components/ui/AddButton';
+import { ExportButton } from '../components/ui/ExportButton';
+import { Button } from '../components/common/Button';
+import { formatDate, exportToCSV } from '../utils/formatters';
 import { buildUnitTree } from '../utils/unitTree';
+import { validateEmail, normalizeIdentifier } from '../utils/authValidation';
 import { 
   UserCheck, UserX, Shield, Warehouse, Plus, Eye, EyeOff, 
   Search, ChevronDown, ChevronRight, Building2, MapPin, 
@@ -263,9 +267,10 @@ export const UserManagementPage = () => {
       return;
     }
 
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(trimmedEmail) || trimmedEmail.includes('..')) {
-      setEmailError('Please enter a valid email address.');
+    const normalizedEmail = normalizeIdentifier(trimmedEmail);
+    const emailErr = validateEmail(normalizedEmail);
+    if (emailErr) {
+      setEmailError(emailErr);
       emailRef.current?.focus();
       return;
     }
@@ -275,7 +280,9 @@ export const UserManagementPage = () => {
       return;
     }
 
-    if (!formData.unit_id) {
+    const isDisposalOnly = formData.role === 'employee' && formData.permission_level === 'disposal_only';
+
+    if (!formData.unit_id && !isDisposalOnly) {
       toast.error('Please select an assigned organizational unit for this staff account.');
       return;
     }
@@ -286,14 +293,13 @@ export const UserManagementPage = () => {
       return;
     }
 
-    const normalizedEmail = trimmedEmail.toLowerCase();
     const payload = {
       ...formData,
       full_name: formData.full_name.trim(),
       username: formData.username.trim(),
       email: normalizedEmail,
-      unit_id: formData.unit_id,
-      unit_ids: [formData.unit_id], // Single-unit array for backend compatibility
+      unit_id: formData.unit_id || null,
+      unit_ids: formData.unit_id ? [formData.unit_id] : [],
       permission_level: formData.role === 'employee' ? (formData.permission_level || 'read_write') : null
     };
 
@@ -348,6 +354,8 @@ export const UserManagementPage = () => {
     {
       header: 'Staff Member',
       accessor: 'full_name',
+      width: 240,
+      minWidth: 200,
       render: (row) => (
         <div>
           <div className="font-semibold text-ink">{row.full_name}</div>
@@ -358,6 +366,8 @@ export const UserManagementPage = () => {
     {
       header: 'Assigned Role',
       accessor: 'role',
+      width: 140,
+      minWidth: 120,
       render: (row) => (
         <span className="font-medium capitalize text-ink">
           {row.role.replace('_', ' ')}
@@ -367,8 +377,17 @@ export const UserManagementPage = () => {
     {
       header: 'Permission Level',
       accessor: 'permission_level',
+      width: 140,
+      minWidth: 130,
       render: (row) => {
         if (!row.permission_level) return <span className="text-slate text-[11px]">System Full</span>;
+        if (row.permission_level === 'disposal_only') {
+          return (
+            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-signal/15 text-signal border border-signal/30">
+              Disposal Requests only
+            </span>
+          );
+        }
         const norm = row.permission_level.replace('_', ' ');
         return (
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -386,6 +405,8 @@ export const UserManagementPage = () => {
     {
       header: 'Assigned Unit',
       accessor: 'units',
+      width: 180,
+      minWidth: 160,
       render: (row) => (
         <div className="max-w-xs">
           {row.units && row.units.length > 0 ? (
@@ -404,25 +425,43 @@ export const UserManagementPage = () => {
     {
       header: 'Status',
       accessor: 'account_status',
+      width: 100,
+      minWidth: 90,
       render: (row) => <StatusBadge status={row.account_status} />
     },
     {
       header: 'Status Control',
       accessor: 'id',
+      width: 130,
+      minWidth: 120,
       render: (row) => (
-        <button
+        <Button
+          size="small"
+          variant={row.account_status === 'active' ? 'danger-soft' : 'secondary'}
           onClick={() => handleToggleStatus(row)}
-          className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-            row.account_status === 'active'
-              ? 'border-line text-slate hover:text-[#B4483A] hover:bg-[#B4483A]/10'
-              : 'border-[#2F7A5C]/30 text-[#2F7A5C] bg-[#2F7A5C]/10'
-          }`}
-        >
-          {row.account_status === 'active' ? 'Deactivate' : 'Activate'}
-        </button>
+          label={row.account_status === 'active' ? 'Deactivate' : 'Activate'}
+        />
       )
     }
   ];
+
+  const handleExportCSV = () => {
+    if (!users || users.length === 0) {
+      toast.error('No staff accounts available to export.');
+      return;
+    }
+    const exportData = users.map((u, idx) => ({
+      'No.': idx + 1,
+      'Full Name': u.full_name || '—',
+      'Username': u.username || '—',
+      'Email': u.email || '—',
+      'Role': (u.role || '').replace(/_/g, ' '),
+      'Assigned Unit(s)': (u.units || []).map(un => un.unit_name).join('; ') || '—',
+      'Status': u.is_active ? 'Active' : 'Inactive'
+    }));
+    exportToCSV(exportData, `EDL_Staff_Directory_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Staff directory exported to CSV.');
+  };
 
   return (
     <AppShell breadcrumbs={[{ label: 'User Management' }, { label: 'Staff & Roles' }]}>
@@ -434,15 +473,18 @@ export const UserManagementPage = () => {
           </p>
         </div>
 
-        <button
-          id="btn-add-staff-account"
-          type="button"
-          onClick={handleOpenAdd}
-          className="px-4 py-2 bg-ink hover:bg-[#193254] text-white text-xs font-medium rounded transition-colors shadow-subtle flex items-center gap-1.5"
-        >
-          <Plus className="w-4 h-4 text-signal" />
-          <span>Add Staff Account</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButton
+            onClick={handleExportCSV}
+            label="Export CSV"
+            title="Export staff directory as CSV"
+          />
+          <AddButton
+            id="btn-add-staff-account"
+            label="Add Staff Account"
+            onClick={handleOpenAdd}
+          />
+        </div>
       </div>
 
       <DataTable
@@ -516,6 +558,14 @@ export const UserManagementPage = () => {
                   setFormData(p => ({ ...p, email: e.target.value }));
                   if (emailError) setEmailError('');
                 }}
+                onBlur={() => {
+                  const normalized = normalizeIdentifier(formData.email);
+                  setFormData(p => ({ ...p, email: normalized }));
+                  if (normalized) {
+                    const err = validateEmail(normalized);
+                    if (err) setEmailError('Please enter a valid email address.');
+                  }
+                }}
                 className={`w-full px-3 py-2 bg-surface border rounded focus:outline-none text-ink transition-colors ${
                   emailError
                     ? 'border-[#B4483A] focus:border-[#B4483A] ring-1 ring-[#B4483A]/30'
@@ -564,6 +614,12 @@ export const UserManagementPage = () => {
                 <option value="unit_head">Unit Head</option>
                 <option value="employee">Employee</option>
               </select>
+              <p className="text-[11px] text-slate mt-1">
+                {formData.role === 'super_admin' && 'Super Admin: System-wide access, can manage item category types, categories, and all unit inventories.'}
+                {formData.role === 'local_admin' && 'Local Admin: Full regional administration, can manage item category types, categories, and authorized units.'}
+                {formData.role === 'unit_head' && 'Unit Head: Unit governance, can manage item category types, verify inventory, and approve transactions.'}
+                {formData.role === 'employee' && 'Employee: Operational staff. Can view categories and item types, but cannot add, edit, or delete category types.'}
+              </p>
             </div>
 
             {formData.role === 'employee' ? (
@@ -577,6 +633,7 @@ export const UserManagementPage = () => {
                   <option value="read_write">Read Write (Full Inventory Access)</option>
                   <option value="read_only">Read Only (View Only, No Mutations)</option>
                   <option value="no_permission">No Permission (Blocked from Inventory)</option>
+                  <option value="disposal_only">Disposal Requests only</option>
                 </select>
               </div>
             ) : (
@@ -626,7 +683,11 @@ export const UserManagementPage = () => {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block font-medium text-ink">
-                Assigned Organizational Unit <span className="text-[#B4483A]">*</span>
+                Assigned Organizational Unit {formData.role === 'employee' && formData.permission_level === 'disposal_only' ? (
+                  <span className="text-slate font-normal">(Optional)</span>
+                ) : (
+                  <span className="text-[#B4483A]">*</span>
+                )}
               </label>
               {isLocalAdmin && (
                 <span className="text-[10px] text-signal font-mono font-medium">
@@ -634,6 +695,12 @@ export const UserManagementPage = () => {
                 </span>
               )}
             </div>
+
+            {formData.role === 'employee' && formData.permission_level === 'disposal_only' && (
+              <p className="text-[11px] text-slate mb-2 bg-surface/60 p-2 rounded border border-line">
+                Receives and handles disposal requests from all units. Assign units only to limit the requests this person receives.
+              </p>
+            )}
 
             {/* Selected unit feedback banner */}
             {selectedUnit ? (
@@ -647,8 +714,26 @@ export const UserManagementPage = () => {
                     {selectedUnit.unit_name}
                   </span>
                 </div>
-                <span className="text-[10px] font-medium text-[#2F7A5C] bg-[#2F7A5C]/15 px-2 py-0.5 rounded shrink-0">
-                  Assigned Unit
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-medium text-[#2F7A5C] bg-[#2F7A5C]/15 px-2 py-0.5 rounded">
+                    Assigned Unit
+                  </span>
+                  {formData.role === 'employee' && formData.permission_level === 'disposal_only' && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, unit_id: '' }))}
+                      className="text-[10px] text-rose-600 hover:underline cursor-pointer"
+                    >
+                      Clear Unit Assignment
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : formData.role === 'employee' && formData.permission_level === 'disposal_only' ? (
+              <div className="mb-2 p-2.5 bg-signal/10 border border-signal/30 rounded-lg flex items-center gap-2 text-signal">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">
+                  All Units Scope: This staff member will receive and handle disposal requests from all units.
                 </span>
               </div>
             ) : (

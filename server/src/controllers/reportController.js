@@ -18,20 +18,12 @@ const reportController = {
         targetUnits = [unit_id];
       }
 
-      const reportData = await db.getRemainingInventory(targetUnits, category, search);
-
-      const totalItems = reportData.length;
-      const totalStock = reportData.reduce((sum, r) => sum + r.remaining_qty, 0);
-      const lowStockCount = reportData.filter(r => r.stock_status === 'Low Stock').length;
-      const outOfStockCount = reportData.filter(r => r.stock_status === 'Out of Stock').length;
+      const reportData = await db.getFlatCurrentInventory(targetUnits, category, search);
 
       return res.json({
         success: true,
         summary: {
-          total_items: totalItems,
-          total_quantity: totalStock,
-          low_stock_count: lowStockCount,
-          out_of_stock_count: outOfStockCount,
+          total_items: reportData.length,
           generated_at: new Date().toISOString()
         },
         data: reportData

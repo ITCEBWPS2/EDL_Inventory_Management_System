@@ -27,6 +27,7 @@ export const YEAR_OPTIONS = Array.from(
 export const DateInput = ({
   value = '',
   onChange,
+  onBlur: externalOnBlur,
   name,
   id,
   required = false,
@@ -38,7 +39,11 @@ export const DateInput = ({
   error: externalError,
   autoFocus = false,
   'aria-label': ariaLabel,
-  tabIndex
+  'aria-required': ariaRequired,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedby,
+  tabIndex,
+  ...restProps
 }) => {
   const [displayText, setDisplayText] = useState(() => fromISODate(value));
   const [isOpen, setIsOpen] = useState(false);
@@ -200,7 +205,7 @@ export const DateInput = ({
     }
   };
 
-  const handleBlur = () => {
+  const handleBlur = (e) => {
     const digits = displayText.replace(/\D/g, '');
     if (digits.length > 0 && digits.length < 8) {
       setInternalError('Please enter a complete date (DD/MM/YYYY)');
@@ -213,6 +218,9 @@ export const DateInput = ({
       }
     } else if (required && digits.length === 0) {
       setInternalError('Date is required');
+    }
+    if (externalOnBlur) {
+      externalOnBlur(e);
     }
   };
 
@@ -325,11 +333,15 @@ export const DateInput = ({
           onBlur={handleBlur}
           maxLength={10}
           aria-label={ariaLabel}
+          aria-required={ariaRequired || (required ? 'true' : undefined)}
+          aria-invalid={ariaInvalid || (activeError ? 'true' : undefined)}
+          aria-describedby={ariaDescribedby}
           className={`w-full px-3 py-2 pr-9 text-xs font-medium text-ink bg-card border rounded transition-colors focus:outline-none focus:border-signal ${
             activeError
-              ? 'border-[#B4483A] ring-1 ring-[#B4483A]/30 focus:border-[#B4483A]'
+              ? 'border-[#dc2626] ring-1 ring-[#dc2626]/30 focus:border-[#dc2626]'
               : 'border-line hover:border-slate/50'
           } ${disabled ? 'bg-surface/50 text-slate cursor-not-allowed opacity-60' : ''} ${className}`}
+          {...restProps}
         />
 
         {/* Calendar Trigger Icon Button */}
@@ -360,7 +372,7 @@ export const DateInput = ({
       </div>
 
       {activeError && (
-        <p className="mt-1 text-[11px] text-[#B4483A] leading-tight font-medium">
+        <p id={ariaDescribedby} className="mt-1 text-[12px] text-[#dc2626] leading-tight font-medium">
           {activeError}
         </p>
       )}

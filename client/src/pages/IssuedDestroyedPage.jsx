@@ -9,10 +9,18 @@ import { StatusBadge } from '../components/common/StatusBadge';
 import { BackButton } from '../components/common/BackButton';
 import { ConfirmModal } from '../components/common/ConfirmModal';
 import { SerialNumberCell } from '../components/verification/SerialNumberCell';
-import { formatDate } from '../utils/formatters';
+import { formatDate, exportToCSV } from '../utils/formatters';
+import { AddButton } from '../components/ui/AddButton';
+import { ExportButton } from '../components/ui/ExportButton';
+import { EditButton, DeleteButton } from '../components/ui/ActionButtons';
 
 export const IssuedDestroyedPage = () => {
-  const { selectedUnitId, canWrite } = useAuth();
+  const { user, selectedUnitId, canWrite, can } = useAuth();
+  const canAdd = can('add_inventory');
+  const canUpdate = can('update_inventory');
+  const canDelete = can('delete_inventory');
+  const canExport = can('view_reports');
+  const showActions = canUpdate || canDelete;
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -56,6 +64,24 @@ export const IssuedDestroyedPage = () => {
     }
   };
 
+  const handleExportCSV = () => {
+    if (!records || records.length === 0) {
+      toast.error('No issued or destroyed records available to export.');
+      return;
+    }
+    const exportData = records.map((r, idx) => ({
+      'No.': idx + 1,
+      'Serial No.': (r.serial_numbers && r.serial_numbers.length > 0) ? r.serial_numbers.join('; ') : (r.serial_number || r.item_code || '—'),
+      'Item Name': r.item_name || '—',
+      'Quantity': r.quantity,
+      'Disposition': r.disposition || '—',
+      'Date': formatDate(r.date),
+      'Reason': r.reason || '—'
+    }));
+    exportToCSV(exportData, `EDL_Issued_Destroyed_Items_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Issued/Destroyed records exported to CSV.');
+  };
+
   return (
     <AppShell
       breadcrumbs={[
@@ -63,42 +89,76 @@ export const IssuedDestroyedPage = () => {
         { label: 'Issued / Destroyed Items' }
       ]}
     >
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-ink tracking-tight">
-          Issued / Destroyed Items
-        </h1>
-        <p className="text-xs text-slate mt-1">
-          Records of inventory items issued out of circulation or condemned and destroyed.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-ink tracking-tight">
+            Issued / Destroyed Items
+          </h1>
+          <p className="text-xs text-slate mt-1">
+            Records of inventory items issued out of circulation or condemned and destroyed.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {canExport && (
+            <ExportButton
+              onClick={handleExportCSV}
+              label="Export CSV"
+              title="Export issued and destroyed records as CSV"
+            />
+          )}
+          {canAdd && (
+            <AddButton
+              id="btn-add-issued-destroyed"
+              label="Add"
+              to="/verification/issued-destroyed/add"
+            />
+          )}
+        </div>
       </div>
 
       {/* Main Card */}
       <div className="bg-card rounded-xl border border-line shadow-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-line bg-surface/70 text-slate font-semibold text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-4 w-12 text-center">No</th>
-                <th className="py-3 px-4 min-w-[320px] w-[340px]">Serial No.</th>
-                <th className="py-3 px-4">Item Name</th>
-                <th className="py-3 px-4 text-center">Qty</th>
-                <th className="py-3 px-4">Disposition</th>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Reason</th>
-                {canWrite && <th className="py-3 px-4 text-right">Actions</th>}
+          <table
+            className="w-full text-left border-collapse"
+            style={{
+              tableLayout: 'fixed',
+              minWidth: showActions ? '1280px' : '1100px'
+            }}
+          >
+            <colgroup>
+              <col style={{ width: '56px', minWidth: '56px' }} />
+              <col style={{ width: '360px', minWidth: '340px' }} />
+              <col style={{ width: '180px', minWidth: '170px' }} />
+              <col style={{ width: '90px', minWidth: '90px' }} />
+              <col style={{ width: '130px', minWidth: '120px' }} />
+              <col style={{ width: '110px', minWidth: '100px' }} />
+              <col style={{ width: '220px', minWidth: '180px' }} />
+              {showActions && <col style={{ width: '130px', minWidth: '120px' }} />}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-white">
+              <tr className="border-b border-line bg-white text-slate font-semibold text-[11.5px] uppercase tracking-[0.04em]">
+                <th className="py-2.5 px-3 text-center" style={{ width: '56px', minWidth: '56px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>No.</th>
+                <th className="py-2.5 px-3.5" style={{ width: '360px', minWidth: '340px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Serial No.</th>
+                <th className="py-2.5 px-3.5" style={{ width: '180px', minWidth: '170px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Item Name</th>
+                <th className="py-2.5 px-3 text-center" style={{ width: '90px', minWidth: '90px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Quantity</th>
+                <th className="py-2.5 px-3.5" style={{ width: '130px', minWidth: '120px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Disposition</th>
+                <th className="py-2.5 px-3.5" style={{ width: '110px', minWidth: '100px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Date</th>
+                <th className="py-2.5 px-3.5" style={{ width: '220px', minWidth: '180px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Reason</th>
+                {showActions && <th className="py-2.5 px-3.5 text-right" style={{ width: '130px', minWidth: '120px', backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>ACTIONS</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-line text-xs text-ink">
               {loading ? (
                 <tr>
-                  <td colSpan={canWrite ? 8 : 7} className="py-14 text-center text-slate">
+                  <td colSpan={showActions ? 8 : 7} className="py-14 text-center text-slate">
                     <div className="inline-block w-6 h-6 border-2 border-slate/30 border-t-ink rounded-full animate-spin mb-2"></div>
                     <div>Loading issued / destroyed records...</div>
                   </td>
                 </tr>
               ) : records.length === 0 ? (
                 <tr>
-                  <td colSpan={canWrite ? 8 : 7} className="py-14 text-center text-slate">
+                  <td colSpan={showActions ? 8 : 7} className="py-14 text-center text-slate">
                     No issued / destroyed records yet.
                   </td>
                 </tr>
@@ -150,26 +210,24 @@ export const IssuedDestroyedPage = () => {
                       </span>
                     </td>
 
-                    {/* Actions (visible only when canWrite) */}
-                    {canWrite && (
+                    {/* Actions (visible only when showActions) */}
+                    {showActions && (
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/verification/issued-destroyed/${row.id}/edit`)}
-                            title="Edit"
-                            className="p-1.5 rounded-md border border-line hover:border-slate/40 hover:bg-surface text-slate hover:text-ink transition-colors"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(row)}
-                            title="Delete"
-                            className="p-1.5 rounded-md border border-line hover:border-[#B4483A]/40 hover:bg-[#B4483A]/10 text-slate hover:text-[#B4483A] transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canUpdate && (
+                            <EditButton
+                              onClick={() => navigate(`/verification/issued-destroyed/${row.id}/edit`)}
+                              title="Edit"
+                              aria-label={`Edit ${row.item_name || 'record'}`}
+                            />
+                          )}
+                          {canDelete && (
+                            <DeleteButton
+                              onClick={() => setDeleteTarget(row)}
+                              title="Delete"
+                              aria-label={`Delete ${row.item_name || 'record'}`}
+                            />
+                          )}
                         </div>
                       </td>
                     )}
@@ -179,21 +237,6 @@ export const IssuedDestroyedPage = () => {
             </tbody>
           </table>
         </div>
-
-        {/* Card Footer with "Add" button at bottom right */}
-        {canWrite && (
-          <div className="p-4 border-t border-line bg-surface/30 flex items-center justify-end">
-            <button
-              type="button"
-              id="btn-add-issued-destroyed"
-              onClick={() => navigate('/verification/issued-destroyed/add')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-ink hover:bg-[#193254] text-white rounded-lg text-xs font-semibold shadow-subtle transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Back Button */}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Eye, FileText, Check, Copy, Printer, X, Tag, ShieldCheck } from 'lucide-react';
 import { IndeterminateCheckbox } from '../common/IndeterminateCheckbox';
+import { Button } from '../common/Button';
 
 export function getBatchSerialList(item) {
   if (Array.isArray(item?.serial_numbers) && item.serial_numbers.length > 0) {
@@ -82,8 +83,10 @@ export const BatchSerialSubTable = ({
         </div>
 
         {onPrintSerial && (
-          <button
-            type="button"
+          <Button
+            size="small"
+            variant="secondary"
+            icon={Printer}
             onClick={() => {
               const itemsToPrint = serials.map(s => ({
                 serial: s,
@@ -92,21 +95,41 @@ export const BatchSerialSubTable = ({
               }));
               onPrintSerial(itemsToPrint);
             }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-card hover:bg-surface border border-line text-xs font-medium text-ink transition-colors shadow-xs"
             title="Print labels for all serial numbers in this batch"
-          >
-            <Printer className="w-3.5 h-3.5 text-signal" />
-            <span>Print All {serials.length} Labels</span>
-          </button>
+            label={`Print All ${serials.length} Labels`}
+          />
         )}
       </div>
 
       <div className="overflow-x-auto rounded border border-line bg-card shadow-sm">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="border-b border-line bg-surface/90 text-[11px] font-semibold text-slate uppercase tracking-wider">
+        <table
+          className="w-full text-left border-collapse text-xs"
+          style={{
+            tableLayout: 'fixed',
+            minWidth: selectedSerials ? '860px' : '816px'
+          }}
+        >
+          <colgroup>
+            {selectedSerials && <col style={{ width: '44px', minWidth: '44px' }} />}
+            <col style={{ width: '56px', minWidth: '56px' }} />
+            <col style={{ width: '380px', minWidth: '320px' }} />
+            <col style={{ width: '150px', minWidth: '150px' }} />
+            <col style={{ width: '90px', minWidth: '90px' }} />
+            <col style={{ width: '140px', minWidth: '140px' }} />
+          </colgroup>
+          <thead className="sticky top-0 z-10 bg-white">
+            <tr className="border-b border-line bg-white text-[11.5px] font-semibold text-slate uppercase tracking-[0.04em]">
               {selectedSerials && (
-                <th className="py-2 px-3 w-10 text-center">
+                <th
+                  className="py-2.5 px-3 text-center shrink-0"
+                  style={{
+                    width: '44px',
+                    minWidth: '44px',
+                    backgroundColor: '#ffffff',
+                    verticalAlign: 'bottom',
+                    padding: '10px 12px'
+                  }}
+                >
                   <IndeterminateCheckbox
                     checked={isAllSelected}
                     indeterminate={isSomeSelected}
@@ -120,11 +143,101 @@ export const BatchSerialSubTable = ({
                   />
                 </th>
               )}
-              <th className="py-2 px-3 w-14">No.</th>
-              <th className="py-2 px-3">Serial No.</th>
-              <th className="py-2 px-3">Manufacturer S/N</th>
-              <th className="py-2 px-3 text-right w-24">Quantity</th>
-              <th className="py-2 px-3 text-right w-32">Actions</th>
+              <th
+                className="py-2.5 px-3 text-left font-semibold text-slate uppercase"
+                style={{
+                  width: '56px',
+                  minWidth: '56px',
+                  backgroundColor: '#ffffff',
+                  whiteSpace: 'normal',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
+                  hyphens: 'none',
+                  lineHeight: 1.25,
+                  padding: '10px 12px',
+                  verticalAlign: 'bottom',
+                  fontSize: '11.5px',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                No.
+              </th>
+              <th
+                className="py-2.5 px-3 text-left font-semibold text-slate uppercase"
+                style={{
+                  width: '380px',
+                  minWidth: '320px',
+                  backgroundColor: '#ffffff',
+                  whiteSpace: 'normal',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
+                  hyphens: 'none',
+                  lineHeight: 1.25,
+                  padding: '10px 12px',
+                  verticalAlign: 'bottom',
+                  fontSize: '11.5px',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                Serial No.
+              </th>
+              <th
+                className="py-2.5 px-3 text-left font-semibold text-slate uppercase"
+                style={{
+                  width: '150px',
+                  minWidth: '150px',
+                  backgroundColor: '#ffffff',
+                  whiteSpace: 'normal',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
+                  hyphens: 'none',
+                  lineHeight: 1.25,
+                  padding: '10px 12px',
+                  verticalAlign: 'bottom',
+                  fontSize: '11.5px',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                Manufacturer S/N
+              </th>
+              <th
+                className="py-2.5 px-3 text-right font-semibold text-slate uppercase"
+                style={{
+                  width: '90px',
+                  minWidth: '90px',
+                  backgroundColor: '#ffffff',
+                  whiteSpace: 'normal',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
+                  hyphens: 'none',
+                  lineHeight: 1.25,
+                  padding: '10px 12px',
+                  verticalAlign: 'bottom',
+                  fontSize: '11.5px',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                Quantity
+              </th>
+              <th
+                className="py-2.5 px-3 text-right font-semibold text-slate uppercase"
+                style={{
+                  width: '140px',
+                  minWidth: '140px',
+                  backgroundColor: '#ffffff',
+                  whiteSpace: 'normal',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
+                  hyphens: 'none',
+                  lineHeight: 1.25,
+                  padding: '10px 12px',
+                  verticalAlign: 'bottom',
+                  fontSize: '11.5px',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line/60">
@@ -147,7 +260,7 @@ export const BatchSerialSubTable = ({
                   }`}
                 >
                   {selectedSerials && (
-                    <td className="py-2 px-3 text-center">
+                    <td className="py-2 px-3 text-center align-top shrink-0">
                       <input
                         type="checkbox"
                         checked={isChecked}
@@ -159,19 +272,20 @@ export const BatchSerialSubTable = ({
                       />
                     </td>
                   )}
-                  <td className="py-2 px-3 font-mono text-slate text-xs font-medium">
+                  <td className="py-2 px-3 font-mono text-slate text-xs font-medium align-top">
                     {idx + 1}
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-2 px-3 align-top">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-ink select-all">
+                      <span className="font-mono text-xs font-semibold text-ink select-all whitespace-nowrap">
                         {serial}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleCopy(serial)}
                         title="Copy serial number"
-                        className="p-1 rounded text-slate hover:text-signal hover:bg-surface transition-colors"
+                        aria-label={`Copy serial number ${serial}`}
+                        className="w-[26px] h-[26px] rounded-[7px] text-slate hover:text-signal hover:bg-surface transition-colors inline-flex items-center justify-center shrink-0"
                       >
                         {copiedSerial === serial ? (
                           <Check className="w-3.5 h-3.5 text-signal" />
@@ -181,17 +295,18 @@ export const BatchSerialSubTable = ({
                       </button>
                     </div>
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-2 px-3 align-top">
                     {mfgSerial ? (
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold text-ink select-all">
+                        <span className="font-mono text-xs font-semibold text-ink select-all whitespace-nowrap">
                           {mfgSerial}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleCopy(mfgSerial)}
                           title="Copy manufacturer S/N"
-                          className="p-1 rounded text-slate hover:text-signal hover:bg-surface transition-colors"
+                          aria-label={`Copy manufacturer S/N ${mfgSerial}`}
+                          className="w-[26px] h-[26px] rounded-[7px] text-slate hover:text-signal hover:bg-surface transition-colors inline-flex items-center justify-center shrink-0"
                         >
                           {copiedSerial === mfgSerial ? (
                             <Check className="w-3.5 h-3.5 text-signal" />
@@ -201,20 +316,21 @@ export const BatchSerialSubTable = ({
                         </button>
                       </div>
                     ) : (
-                      <span className="text-slate font-normal">—</span>
+                      <span className="text-slate font-normal select-none">—</span>
                     )}
                   </td>
-                  <td className="py-2 px-3 text-right font-medium text-ink tabular-nums">
+                  <td className="py-2 px-3 text-right font-medium text-ink tabular-nums align-top">
                     1
                   </td>
-                  <td className="py-2 px-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
+                  <td className="py-2 px-3 text-right align-top">
+                    <div className="flex items-center justify-end gap-1.5">
                       {onPrintSerial && (
                         <button
                           type="button"
                           onClick={() => handleTriggerPrint(serial)}
                           title="Print label for this serial"
-                          className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                          aria-label={`Print label for ${serial}`}
+                          className="w-[26px] h-[26px] rounded-[7px] inline-flex items-center justify-center hover:bg-surface text-slate hover:text-signal transition-colors"
                         >
                           <Printer className="w-3.5 h-3.5" />
                         </button>
@@ -223,15 +339,17 @@ export const BatchSerialSubTable = ({
                         type="button"
                         onClick={() => setActiveModal({ type: 'view', serial, mfgSerial, index: idx + 1 })}
                         title="View Serial Unit Details"
-                        className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                        aria-label={`View unit details for ${serial}`}
+                        className="w-[26px] h-[26px] rounded-[7px] inline-flex items-center justify-center hover:bg-surface text-slate hover:text-signal transition-colors"
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>
                       <button
                         type="button"
                         onClick={() => setActiveModal({ type: 'document', serial, mfgSerial, index: idx + 1 })}
-                        title="Asset Tag &amp; Verification Slip"
-                        className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
+                        title="Asset Tag & Verification Slip"
+                        aria-label={`Asset Tag for ${serial}`}
+                        className="w-[26px] h-[26px] rounded-[7px] inline-flex items-center justify-center hover:bg-surface text-slate hover:text-signal transition-colors"
                       >
                         <FileText className="w-3.5 h-3.5" />
                       </button>
@@ -260,13 +378,13 @@ export const BatchSerialSubTable = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
                 onClick={() => setActiveModal(null)}
-                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                aria-label="Close details dialog"
+              />
             </div>
 
             <div className="p-5 space-y-3.5 text-xs">
@@ -339,34 +457,31 @@ export const BatchSerialSubTable = ({
 
             <div className="p-4 border-t border-line bg-surface/40 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="small"
+                  variant="secondary"
+                  icon={Copy}
+                  label="Copy Serial"
                   onClick={() => handleCopy(activeModal.serial)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Serial</span>
-                </button>
+                />
                 {onPrintSerial && (
-                  <button
-                    type="button"
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    icon={Printer}
+                    label="Print Label"
                     onClick={() => {
                       handleTriggerPrint(activeModal.serial);
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-signal" />
-                    <span>Print Label</span>
-                  </button>
+                  />
                 )}
               </div>
-              <button
-                type="button"
+              <Button
+                size="small"
+                variant="primary"
+                label="Close"
                 onClick={() => setActiveModal(null)}
-                className="px-4 py-1.5 rounded bg-ink text-surface text-xs font-medium hover:bg-slate transition-colors"
-              >
-                Close
-              </button>
+              />
             </div>
           </div>
         </div>
@@ -388,13 +503,13 @@ export const BatchSerialSubTable = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                icon={X}
                 onClick={() => setActiveModal(null)}
-                className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                aria-label="Close asset tag dialog"
+              />
             </div>
 
             <div className="p-6 text-center">
@@ -431,36 +546,33 @@ export const BatchSerialSubTable = ({
 
             <div className="p-4 border-t border-line bg-surface/40 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="small"
+                  variant="secondary"
+                  icon={Printer}
+                  label="Print Slip"
                   onClick={() => {
                     window.print();
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Slip</span>
-                </button>
+                />
                 {onPrintSerial && (
-                  <button
-                    type="button"
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    icon={Tag}
+                    label="Print Label"
                     onClick={() => {
                       handleTriggerPrint(activeModal.serial);
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-line bg-card hover:bg-surface text-xs font-medium text-ink transition-colors"
-                  >
-                    <Tag className="w-3.5 h-3.5 text-signal" />
-                    <span>Print Label</span>
-                  </button>
+                  />
                 )}
               </div>
-              <button
-                type="button"
+              <Button
+                size="small"
+                variant="primary"
+                label="Done"
                 onClick={() => setActiveModal(null)}
-                className="px-4 py-1.5 rounded bg-ink text-surface text-xs font-medium hover:bg-slate transition-colors"
-              >
-                Done
-              </button>
+              />
             </div>
           </div>
         </div>

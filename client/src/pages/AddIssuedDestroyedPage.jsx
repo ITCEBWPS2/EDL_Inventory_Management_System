@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { AppShell } from '../components/layout/AppShell';
 import { DateInput } from '../components/common/DateInput';
+import { Button } from '../components/common/Button';
 
 export const AddIssuedDestroyedPage = () => {
   const { user, selectedUnitId } = useAuth();
@@ -603,22 +604,22 @@ export const AddIssuedDestroyedPage = () => {
 
             {/* Action Buttons: Cancel (left) & Save (right) */}
             <div className="pt-4 border-t border-line flex items-center justify-between gap-3">
-              <Link
+              <Button
                 to="/verification/issued-destroyed"
                 id="btn-cancel-add"
-                className="px-4 py-2 text-xs font-medium text-slate hover:text-ink bg-card hover:bg-surface border border-line rounded-lg transition-colors"
-              >
-                Cancel
-              </Link>
+                variant="secondary"
+                size="regular"
+                label="Cancel"
+              />
 
-              <button
+              <Button
                 type="submit"
                 id="btn-save-issued-destroyed"
-                disabled={submitting}
-                className="px-5 py-2 text-xs font-semibold text-white bg-ink hover:bg-[#193254] rounded-lg transition-colors shadow-subtle flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-              >
-                {submitting ? 'Saving...' : 'Save'}
-              </button>
+                variant="primary"
+                size="regular"
+                loading={submitting}
+                label="Save"
+              />
             </div>
           </form>
         </div>

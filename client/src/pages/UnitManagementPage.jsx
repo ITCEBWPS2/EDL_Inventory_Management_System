@@ -6,6 +6,9 @@ import { AppShell } from '../components/layout/AppShell';
 import { DataTable } from '../components/common/DataTable';
 import { RecordModal } from '../components/common/RecordModal';
 import { StatusBadge } from '../components/common/StatusBadge';
+import { AddButton } from '../components/ui/AddButton';
+import { ExportButton } from '../components/ui/ExportButton';
+import { exportToCSV } from '../utils/formatters';
 import { Plus, Building2, MapPin, Warehouse } from 'lucide-react';
 
 export const UnitManagementPage = () => {
@@ -99,11 +102,15 @@ export const UnitManagementPage = () => {
       header: 'Unit Code',
       accessor: 'unit_code',
       tabular: true,
+      width: 140,
+      minWidth: 130,
       render: (row) => <span className="font-mono font-semibold text-ink">{row.unit_code}</span>
     },
     {
       header: 'Unit Name',
       accessor: 'unit_name',
+      width: 220,
+      minWidth: 180,
       render: (row) => (
         <div className="flex items-center gap-2">
           {row.unit_type === 'area' && <Building2 className="w-3.5 h-3.5 text-signal" />}
@@ -116,6 +123,8 @@ export const UnitManagementPage = () => {
     {
       header: 'Hierarchy Level',
       accessor: 'unit_type',
+      width: 140,
+      minWidth: 130,
       render: (row) => (
         <span className="capitalize text-xs font-semibold px-2 py-0.5 rounded bg-surface border border-line text-ink">
           {row.unit_type}
@@ -124,14 +133,35 @@ export const UnitManagementPage = () => {
     },
     {
       header: 'Physical Location',
-      accessor: 'location'
+      accessor: 'location',
+      width: 220,
+      minWidth: 180
     },
     {
       header: 'Status',
       accessor: 'status',
+      width: 110,
+      minWidth: 110,
       render: (row) => <StatusBadge status={row.status} />
     }
   ];
+
+  const handleExportCSV = () => {
+    if (!units || units.length === 0) {
+      toast.error('No organizational units available to export.');
+      return;
+    }
+    const exportData = units.map((u, idx) => ({
+      'No.': idx + 1,
+      'Unit Code': u.unit_code || '—',
+      'Unit Name': u.unit_name || '—',
+      'Unit Type': u.unit_type || '—',
+      'Parent Unit': u.parent_unit_name || '—',
+      'Description / Address': u.description || '—'
+    }));
+    exportToCSV(exportData, `EDL_Organizational_Units_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Units directory exported to CSV.');
+  };
 
   return (
     <AppShell breadcrumbs={[{ label: 'Settings' }, { label: 'Units & Locations' }]}>
@@ -143,15 +173,20 @@ export const UnitManagementPage = () => {
           </p>
         </div>
 
-        {(isSuperAdmin || isLocalAdmin) && (
-          <button
-            onClick={handleOpenAdd}
-            className="px-4 py-2 bg-ink hover:bg-[#193254] text-white text-xs font-medium rounded transition-colors shadow-subtle flex items-center gap-1.5"
-          >
-            <Plus className="w-4 h-4 text-signal" />
-            <span>Add New Unit</span>
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButton
+            onClick={handleExportCSV}
+            label="Export CSV"
+            title="Export units directory as CSV"
+          />
+          {(isSuperAdmin || isLocalAdmin) && (
+            <AddButton
+              id="btn-add-unit"
+              label="Add New Unit"
+              onClick={handleOpenAdd}
+            />
+          )}
+        </div>
       </div>
 
       <DataTable

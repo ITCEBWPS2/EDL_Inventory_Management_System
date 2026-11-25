@@ -54,16 +54,29 @@ const dashboardController = {
       const lowStockCount = remainingList.filter(r => r.stock_status === 'Low Stock').length;
       const outOfStockCount = remainingList.filter(r => r.stock_status === 'Out of Stock').length;
 
-      // 3. Category Breakdown (for Donut Chart)
+      // 3. Category Breakdown (for Donut Chart: Inventory Totals by Category)
+      // Built from inventory_items of the active unit (targetUnits), summing quantity of every item per category.
+      // Matches the logic and filters of the Master Item Catalog and Current Inventory Report.
       const categoryMap = {};
-      remainingList.forEach(item => {
-        const cat = item.category || 'Other';
-        categoryMap[cat] = (categoryMap[cat] || 0) + Number(item.remaining_qty);
+      let grandTotalInventory = 0;
+
+      items.forEach(item => {
+        const rawSerials = Array.isArray(item.serial_numbers) ? item.serial_numbers.filter(Boolean) : [];
+        const qty = rawSerials.length > 0 ? rawSerials.length : Math.max(1, Number(item.quantity) || 1);
+        const cat = item.category || 'General';
+        categoryMap[cat] = (categoryMap[cat] || 0) + qty;
+        grandTotalInventory += qty;
       });
-      const categoryBreakdown = Object.keys(categoryMap).map(name => ({
-        name,
-        quantity: categoryMap[name]
-      })).sort((a, b) => b.quantity - a.quantity);
+
+      const categoryBreakdown = Object.keys(categoryMap).map(name => {
+        const quantity = categoryMap[name];
+        const percentage = grandTotalInventory > 0 ? Math.round((quantity / grandTotalInventory) * 100) : 0;
+        return {
+          name,
+          quantity,
+          percentage
+        };
+      }).sort((a, b) => b.quantity - a.quantity);
 
       // 4. Recent Transactions (last 8)
       const combinedRecent = [
@@ -100,8 +113,31 @@ const dashboardController = {
       });
       const recentTransactions = combinedRecent.slice(0, 8);
 
-      // 5. Verification Status
-      const latestVerification = verifications.length > 0 ? verifications[0] : null;
+      // 5. Verification Status (Latest CONFIRMED verification only; draft/cancelled ignored)
+      const confirmedVerifications = verifications
+        .filter(v => v.status === 'confirmed')
+        .sort((a, b) => {
+          const dateA = a.date ? new Date(a.date).getTime() : 0;
+          const dateB = b.date ? new Date(b.date).getTime() : 0;
+          if (dateA !== dateB) return dateB - dateA;
+          const createA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const createB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return createB - createA;
+        });
+
+      const latestConfirmed = confirmedVerifications.length > 0 ? confirmedVerifications[0] : null;
+
+      const lastVerification = latestConfirmed ? {
+        id: latestConfirmed.id,
+        date: latestConfirmed.date,
+        year: latestConfirmed.year,
+        unit_id: latestConfirmed.unit_id,
+        unit_name: latestConfirmed.unit_name || null,
+        status: latestConfirmed.status,
+        verified_by: (latestConfirmed.verified_by && latestConfirmed.verified_by.length > 0)
+          ? latestConfirmed.verified_by
+          : [latestConfirmed.verifier_1, latestConfirmed.verifier_2, latestConfirmed.verifier_3].filter(Boolean)
+      } : null;
 
       // 6. Unit Hierarchy Tree for dashboard browser (supports deep arbitrary levels)
       const buildSubTree = (parentId = null) => {
@@ -137,12 +173,15 @@ const dashboardController = {
             out_of_stock_count: outOfStockCount
           },
           category_breakdown: categoryBreakdown,
+          category_total: grandTotalInventory,
+          grand_total: grandTotalInventory,
           recent_transactions: recentTransactions,
+          last_verification: lastVerification,
           verification_status: {
-            has_verification: !!latestVerification,
-            status: latestVerification?.status || 'No Data',
-            year: latestVerification?.year || new Date().getFullYear(),
-            verified_by: latestVerification?.verified_by || []
+            has_verification: !!latestConfirmed,
+            status: latestConfirmed?.status || 'No Data',
+            year: latestConfirmed?.year || new Date().getFullYear(),
+            verified_by: lastVerification?.verified_by || []
           },
           unit_tree: unitTree
         }

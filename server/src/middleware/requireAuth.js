@@ -60,6 +60,26 @@ const requireAuth = async (req, res, next) => {
       unitIds: unitIds || []
     };
 
+    // Central restriction for disposal_only permission level
+    if (req.user.permission_level === 'disposal_only') {
+      const pathUrl = req.originalUrl || req.url || '';
+      const allowedPrefixes = [
+        '/api/auth',
+        '/api/notifications',
+        '/api/disposal-requests',
+        '/api/disposal'
+      ];
+      const isAllowedPrefix = allowedPrefixes.some(p => pathUrl.startsWith(p));
+      const isReadUnits = pathUrl.startsWith('/api/units') && req.method === 'GET';
+
+      if (!isAllowedPrefix && !isReadUnits) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access Denied: Disposal-only staff are restricted to disposal requests.'
+        });
+      }
+    }
+
     next();
   } catch (error) {
     console.error('Auth verification error:', error);

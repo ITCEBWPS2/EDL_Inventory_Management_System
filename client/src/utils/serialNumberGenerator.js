@@ -268,53 +268,126 @@ export function resolveSubCategoryCode(subType) {
   return cleaned.substring(0, 3) || 'GEN';
 }
 
+const CUSTOM_ITEM_TYPE_CODES = new Map();
+
+export function registerCustomItemTypeCode(a, b, c = '') {
+  if (!a || !b) return;
+  let itemTypeName = '';
+  let code = '';
+  let subcatCode = '';
+
+  if (c && typeof c === 'string') {
+    if (/^[A-Z0-9\-_]+$/.test(c.trim()) && !/^[A-Z0-9\-_]+$/.test(b.trim())) {
+      subcatCode = a;
+      itemTypeName = b;
+      code = c;
+    } else {
+      itemTypeName = a;
+      code = b;
+      subcatCode = c;
+    }
+  } else {
+    itemTypeName = a;
+    code = b;
+  }
+
+  const normName = String(itemTypeName).trim().toLowerCase();
+  const cleanCode = String(code).trim().toUpperCase();
+  if (subcatCode) {
+    const key = `${String(subcatCode).trim().toUpperCase()}:${normName}`;
+    CUSTOM_ITEM_TYPE_CODES.set(key, cleanCode);
+    const resolvedSub = resolveSubCategoryCode(subcatCode);
+    if (resolvedSub) {
+      CUSTOM_ITEM_TYPE_CODES.set(`${resolvedSub.toUpperCase()}:${normName}`, cleanCode);
+    }
+  }
+  CUSTOM_ITEM_TYPE_CODES.set(normName, cleanCode);
+}
+
+export function clearCustomItemTypeCodes() {
+  CUSTOM_ITEM_TYPE_CODES.clear();
+}
+
+export function generateItemTypeCodeCandidate(itemTypeName, existingCodes = []) {
+  if (!itemTypeName || typeof itemTypeName !== 'string') return 'ITEM';
+  const trimmed = itemTypeName.trim();
+
+  // If already in ITEM_TYPE_CODES
+  if (ITEM_TYPE_CODES[trimmed]) {
+    const full = ITEM_TYPE_CODES[trimmed];
+    const parts = full.split('-');
+    return parts.length > 1 ? parts.slice(0, -1).join('-') : full;
+  }
+
+  const stopWords = ['chair', 'table', 'desk', 'cabinet', 'cupboard', 'rack', 'device', 'unit', 'machine', 'equipment', 'item'];
+  let words = trimmed.split(/[\s\-–_]+/);
+  let filtered = words.filter(w => !stopWords.includes(w.toLowerCase()));
+  if (filtered.length === 0) filtered = words;
+
+  let mainWord = (filtered[0] || 'ITEM').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (mainWord.length > 7) {
+    mainWord = mainWord.substring(0, 7);
+  }
+
+  let base = mainWord;
+  if (filtered.length > 1) {
+    let secondWord = (filtered[1] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (secondWord) {
+      base += `-${secondWord.substring(0, 4)}`;
+    }
+  }
+
+  // Ensure uniqueness
+  const upperExisting = new Set((existingCodes || []).map(c => String(c).toUpperCase().trim()));
+  let candidate = base;
+  let counter = 2;
+  while (upperExisting.has(candidate)) {
+    candidate = `${base}${counter}`;
+    counter++;
+  }
+
+  return candidate;
+}
+
 /**
  * Derives item type code (e.g. CLERICL-CHR for "Clerical Chair")
  */
-export function deriveItemTypeCode(itemType, subcatCode = 'CHR') {
+export function deriveItemTypeCode(itemType, subcatCode = 'CHR', customTypeMap = null) {
   if (!itemType || typeof itemType !== 'string') return `ITM-${subcatCode}`;
   const trimmed = itemType.trim();
+  const lower = trimmed.toLowerCase();
 
-  // 1. Check exact map
+  // 1. Check customTypeMap / CUSTOM_ITEM_TYPE_CODES first
+  const customKey = `${String(subcatCode).trim().toUpperCase()}:${lower}`;
+  const customCode = (customTypeMap && (customTypeMap.get(customKey) || customTypeMap.get(lower))) ||
+    CUSTOM_ITEM_TYPE_CODES.get(customKey) ||
+    CUSTOM_ITEM_TYPE_CODES.get(lower);
+
+  if (customCode) {
+    if (customCode.endsWith(`-${subcatCode}`)) {
+      return customCode;
+    }
+    return `${customCode}-${subcatCode}`;
+  }
+
+  // 2. Check exact built-in map
   if (ITEM_TYPE_CODES[trimmed]) {
     return ITEM_TYPE_CODES[trimmed];
   }
 
-  // 2. Normalize and check case-insensitive match
-  const lower = trimmed.toLowerCase();
+  // 3. Case-insensitive built-in match
   for (const [name, code] of Object.entries(ITEM_TYPE_CODES)) {
     if (name.toLowerCase() === lower) {
       return code;
     }
   }
 
-  // 3. Dynamic derivation for custom types:
-  // Remove common nouns like chair, table, etc.
-  const stopWords = ['chair', 'table', 'desk', 'cabinet', 'cupboard', 'rack', 'device', 'unit', 'machine', 'equipment', 'item'];
-  let words = trimmed.split(/[\s\-–_]+/);
-  let filtered = words.filter(w => !stopWords.includes(w.toLowerCase()));
-  if (filtered.length === 0) filtered = words;
-
-  // Shorten first word
-  let mainWord = (filtered[0] || 'ITEM').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  if (mainWord.length > 7) {
-    mainWord = mainWord.substring(0, 7);
+  // 4. Dynamic derivation
+  const baseCode = generateItemTypeCodeCandidate(trimmed);
+  if (baseCode.endsWith(`-${subcatCode}`)) {
+    return baseCode;
   }
-
-  let code = mainWord;
-  if (filtered.length > 1) {
-    let secondWord = (filtered[1] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    if (secondWord) {
-      code += `-${secondWord.substring(0, 4)}`;
-    }
-  }
-
-  // Append subcategory suffix if not already present
-  if (!code.endsWith(`-${subcatCode}`)) {
-    code += `-${subcatCode}`;
-  }
-
-  return code;
+  return `${baseCode}-${subcatCode}`;
 }
 
 /**
@@ -454,6 +527,60 @@ export function isBatchItem(item) {
     (Array.isArray(item.serial_numbers) && item.serial_numbers.length > 1) ||
     Number(item.quantity) > 1
   );
+}
+
+/**
+ * Generates unique sub_category_code and item_type_code for serial number generation.
+ * Guaranteed uppercase, letters and digits only, unique within the category.
+ */
+export function generateUniqueTypeCodes({ typeName, category = '', existingTypes = [] }) {
+  const cleanName = String(typeName || '').trim();
+
+  // 1. Base Sub-Category Code (e.g. "CHR", "TBL", "SOF", "BOT")
+  let baseSubCatCode = resolveSubCategoryCode(cleanName);
+  if (!baseSubCatCode || baseSubCatCode === 'GEN') {
+    const alphaOnly = cleanName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    baseSubCatCode = alphaOnly.substring(0, 4) || 'SUB';
+  }
+  baseSubCatCode = baseSubCatCode.replace(/[^A-Z0-9]/g, '').toUpperCase();
+  if (baseSubCatCode.length < 3) {
+    baseSubCatCode = baseSubCatCode.padEnd(3, 'X');
+  }
+
+  // Ensure unique sub_category_code among existing types in this category
+  const existingSubCatCodes = new Set(
+    (existingTypes || [])
+      .map(t => (t.sub_category_code || t.code || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  let uniqueSubCatCode = baseSubCatCode;
+  let counter = 1;
+  while (existingSubCatCodes.has(uniqueSubCatCode)) {
+    counter++;
+    const suffix = String(counter);
+    uniqueSubCatCode = `${baseSubCatCode.substring(0, Math.max(2, 6 - suffix.length))}${suffix}`;
+  }
+
+  // 2. Item Type Code (e.g. "OFFICE-SOF" or "SOFA-FUR")
+  const baseItemTypeCode = deriveItemTypeCode(cleanName, uniqueSubCatCode);
+  const existingItemTypeCodes = new Set(
+    (existingTypes || [])
+      .map(t => (t.item_type_code || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  let uniqueItemTypeCode = baseItemTypeCode;
+  let itCounter = 1;
+  while (existingItemTypeCodes.has(uniqueItemTypeCode)) {
+    itCounter++;
+    uniqueItemTypeCode = `${baseItemTypeCode}-${itCounter}`;
+  }
+
+  return {
+    sub_category_code: uniqueSubCatCode,
+    item_type_code: uniqueItemTypeCode
+  };
 }
 
 

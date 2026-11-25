@@ -209,19 +209,55 @@ function resolveSubCategoryCode(subType) {
   return cleaned.substring(0, 3) || 'GEN';
 }
 
-function deriveItemTypeCode(itemType, subcatCode = 'CHR') {
-  if (!itemType || typeof itemType !== 'string') return `ITM-${subcatCode}`;
-  const trimmed = itemType.trim();
+const CUSTOM_ITEM_TYPE_CODES = new Map();
 
-  if (ITEM_TYPE_CODES[trimmed]) {
-    return ITEM_TYPE_CODES[trimmed];
+function registerCustomItemTypeCode(a, b, c = '') {
+  if (!a || !b) return;
+  let itemTypeName = '';
+  let code = '';
+  let subcatCode = '';
+
+  if (c && typeof c === 'string') {
+    if (/^[A-Z0-9\-_]+$/.test(c.trim()) && !/^[A-Z0-9\-_]+$/.test(b.trim())) {
+      subcatCode = a;
+      itemTypeName = b;
+      code = c;
+    } else {
+      itemTypeName = a;
+      code = b;
+      subcatCode = c;
+    }
+  } else {
+    itemTypeName = a;
+    code = b;
   }
 
-  const lower = trimmed.toLowerCase();
-  for (const [name, code] of Object.entries(ITEM_TYPE_CODES)) {
-    if (name.toLowerCase() === lower) {
-      return code;
+  const normName = String(itemTypeName).trim().toLowerCase();
+  const cleanCode = String(code).trim().toUpperCase();
+  if (subcatCode) {
+    const key = `${String(subcatCode).trim().toUpperCase()}:${normName}`;
+    CUSTOM_ITEM_TYPE_CODES.set(key, cleanCode);
+    const resolvedSub = resolveSubCategoryCode(subcatCode);
+    if (resolvedSub) {
+      CUSTOM_ITEM_TYPE_CODES.set(`${resolvedSub.toUpperCase()}:${normName}`, cleanCode);
     }
+  }
+  CUSTOM_ITEM_TYPE_CODES.set(normName, cleanCode);
+}
+
+function clearCustomItemTypeCodes() {
+  CUSTOM_ITEM_TYPE_CODES.clear();
+}
+
+function generateItemTypeCodeCandidate(itemTypeName, existingCodes = []) {
+  if (!itemTypeName || typeof itemTypeName !== 'string') return 'ITEM';
+  const trimmed = itemTypeName.trim();
+
+  // If already in ITEM_TYPE_CODES
+  if (ITEM_TYPE_CODES[trimmed]) {
+    const full = ITEM_TYPE_CODES[trimmed];
+    const parts = full.split('-');
+    return parts.length > 1 ? parts.slice(0, -1).join('-') : full;
   }
 
   const stopWords = ['chair', 'table', 'desk', 'cabinet', 'cupboard', 'rack', 'device', 'unit', 'machine', 'equipment', 'item'];
@@ -234,19 +270,62 @@ function deriveItemTypeCode(itemType, subcatCode = 'CHR') {
     mainWord = mainWord.substring(0, 7);
   }
 
-  let code = mainWord;
+  let base = mainWord;
   if (filtered.length > 1) {
     let secondWord = (filtered[1] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     if (secondWord) {
-      code += `-${secondWord.substring(0, 4)}`;
+      base += `-${secondWord.substring(0, 4)}`;
     }
   }
 
-  if (!code.endsWith(`-${subcatCode}`)) {
-    code += `-${subcatCode}`;
+  // Ensure uniqueness
+  const upperExisting = new Set((existingCodes || []).map(c => String(c).toUpperCase().trim()));
+  let candidate = base;
+  let counter = 2;
+  while (upperExisting.has(candidate)) {
+    candidate = `${base}${counter}`;
+    counter++;
   }
 
-  return code;
+  return candidate;
+}
+
+function deriveItemTypeCode(itemType, subcatCode = 'CHR', customTypeMap = null) {
+  if (!itemType || typeof itemType !== 'string') return `ITM-${subcatCode}`;
+  const trimmed = itemType.trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. Check customTypeMap / CUSTOM_ITEM_TYPE_CODES first
+  const customKey = `${String(subcatCode).trim().toUpperCase()}:${lower}`;
+  const customCode = (customTypeMap && (customTypeMap.get(customKey) || customTypeMap.get(lower))) ||
+    CUSTOM_ITEM_TYPE_CODES.get(customKey) ||
+    CUSTOM_ITEM_TYPE_CODES.get(lower);
+
+  if (customCode) {
+    if (customCode.endsWith(`-${subcatCode}`)) {
+      return customCode;
+    }
+    return `${customCode}-${subcatCode}`;
+  }
+
+  // 2. Check exact built-in map
+  if (ITEM_TYPE_CODES[trimmed]) {
+    return ITEM_TYPE_CODES[trimmed];
+  }
+
+  // 3. Case-insensitive built-in match
+  for (const [name, code] of Object.entries(ITEM_TYPE_CODES)) {
+    if (name.toLowerCase() === lower) {
+      return code;
+    }
+  }
+
+  // 4. Dynamic derivation
+  const baseCode = generateItemTypeCodeCandidate(trimmed);
+  if (baseCode.endsWith(`-${subcatCode}`)) {
+    return baseCode;
+  }
+  return `${baseCode}-${subcatCode}`;
 }
 
 function getNextSequence(existingItems = [], basePrefix = '', serverCounters = {}) {
@@ -368,6 +447,57 @@ function isBatchItem(item) {
   );
 }
 
+function generateUniqueTypeCodes({ typeName, category = '', existingTypes = [] }) {
+  const cleanName = String(typeName || '').trim();
+  const catCode = resolveCategoryCode(category);
+
+  // 1. Base Sub-Category Code (e.g. "CHR", "TBL", "SOF", "BOT")
+  let baseSubCatCode = resolveSubCategoryCode(cleanName);
+  if (!baseSubCatCode || baseSubCatCode === 'GEN') {
+    const alphaOnly = cleanName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    baseSubCatCode = alphaOnly.substring(0, 4) || 'SUB';
+  }
+  baseSubCatCode = baseSubCatCode.replace(/[^A-Z0-9]/g, '').toUpperCase();
+  if (baseSubCatCode.length < 3) {
+    baseSubCatCode = baseSubCatCode.padEnd(3, 'X');
+  }
+
+  // Ensure unique sub_category_code among existing types in this category
+  const existingSubCatCodes = new Set(
+    (existingTypes || [])
+      .map(t => (t.sub_category_code || t.code || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  let uniqueSubCatCode = baseSubCatCode;
+  let counter = 1;
+  while (existingSubCatCodes.has(uniqueSubCatCode)) {
+    counter++;
+    const suffix = String(counter);
+    uniqueSubCatCode = `${baseSubCatCode.substring(0, Math.max(2, 6 - suffix.length))}${suffix}`;
+  }
+
+  // 2. Item Type Code (e.g. "OFFICE-SOF" or "SOFA-FUR")
+  const baseItemTypeCode = deriveItemTypeCode(cleanName, uniqueSubCatCode);
+  const existingItemTypeCodes = new Set(
+    (existingTypes || [])
+      .map(t => (t.item_type_code || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  let uniqueItemTypeCode = baseItemTypeCode;
+  let itCounter = 1;
+  while (existingItemTypeCodes.has(uniqueItemTypeCode)) {
+    itCounter++;
+    uniqueItemTypeCode = `${baseItemTypeCode}-${itCounter}`;
+  }
+
+  return {
+    sub_category_code: uniqueSubCatCode,
+    item_type_code: uniqueItemTypeCode
+  };
+}
+
 module.exports = {
   CONSTANT_PREFIX,
   CATEGORY_CODES,
@@ -377,6 +507,10 @@ module.exports = {
   resolveCategoryCode,
   resolveSubCategoryCode,
   deriveItemTypeCode,
+  registerCustomItemTypeCode,
+  clearCustomItemTypeCodes,
+  generateItemTypeCodeCandidate,
+  generateUniqueTypeCodes,
   getNextSequence,
   generateBatchSerialNumbers,
   generateSerialNumber,

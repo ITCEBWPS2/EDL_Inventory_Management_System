@@ -50,7 +50,7 @@ export const SerialNumberCell = ({
   const needsScroll = expanded && serials.length > 10;
 
   return (
-    <div className="font-mono text-xs select-text w-full">
+    <div className="font-mono text-xs select-text w-full min-w-[380px]">
       {/* Batch Badge for multi-serial items */}
       {isBatch && (
         <div className="flex items-center gap-1.5 mb-1.5 no-print">
@@ -73,7 +73,7 @@ export const SerialNumberCell = ({
           return (
             <div
               key={`${sn}-${idx}`}
-              className="leading-[1.35] whitespace-nowrap overflow-hidden text-ellipsis flex items-baseline gap-1"
+              className="leading-[1.35] whitespace-nowrap flex items-baseline gap-1"
             >
               <span
                 className={`font-mono font-semibold text-ink whitespace-nowrap ${

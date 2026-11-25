@@ -3,3 +3,19 @@ node_modules/
 dist/
 server_memory_backup.json
 server/server_memory_backup.json
+server/backups/
+
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Build files
+dist/
+build/
+
+# Log files
+*.log

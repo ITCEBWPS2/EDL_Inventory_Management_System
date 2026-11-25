@@ -17,7 +17,10 @@
     "migrate:chair-types": "node src/scripts/migrate-chair-type-names.js",
     "cleanup:received-dates": "node src/scripts/clear-autofilled-received-dates.js",
     "cleanup:verification-record": "node src/scripts/remove-verification-record.js",
-    "fix:swap-remarks-label": "node src/scripts/swap-verification-remarks-label.js"
+    "cleanup:test-verifications": "node src/scripts/remove-test-verifications.js",
+    "cleanup:non-ito": "node src/scripts/cleanup-non-ito-data.js",
+    "fix:swap-remarks-label": "node src/scripts/swap-verification-remarks-label.js",
+    "fix:normalize-emails": "node src/scripts/normalize-profile-emails.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

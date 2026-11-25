@@ -1,4 +1,5 @@
 const db = require('../services/db');
+const auditLogger = require('../services/auditLogger');
 
 const unitController = {
   /**
@@ -77,6 +78,21 @@ const unitController = {
         status
       });
 
+      await auditLogger.log({
+        action: 'CREATE',
+        module: 'Units',
+        status: 'success',
+        entity_type: 'Unit',
+        entity_id: newUnit.id,
+        entity_reference: `${newUnit.unit_name} (${newUnit.unit_code})`,
+        unit_id: newUnit.id,
+        unit_name: newUnit.unit_name,
+        description: `${req.user.full_name} (${req.user.role}) created unit '${newUnit.unit_name}' (${newUnit.unit_code})`,
+        changes: auditLogger.snapshot(newUnit),
+        req,
+        res
+      });
+
       return res.status(201).json({
         success: true,
         message: 'Unit created successfully.',
@@ -96,6 +112,8 @@ const unitController = {
       const { id } = req.params;
       const { unit_name, unit_code, unit_type, parent_unit_id, location, status } = req.body;
 
+      const existing = await db.getUnitById(id);
+
       const updated = await db.updateUnit(id, {
         unit_name,
         unit_code,
@@ -108,6 +126,21 @@ const unitController = {
       if (!updated) {
         return res.status(404).json({ success: false, message: 'Unit not found.' });
       }
+
+      await auditLogger.log({
+        action: 'UPDATE',
+        module: 'Units',
+        status: 'success',
+        entity_type: 'Unit',
+        entity_id: updated.id,
+        entity_reference: `${updated.unit_name} (${updated.unit_code})`,
+        unit_id: updated.id,
+        unit_name: updated.unit_name,
+        description: `${req.user.full_name} (${req.user.role}) updated unit '${updated.unit_name}' (${updated.unit_code})`,
+        changes: auditLogger.diff(existing, updated),
+        req,
+        res
+      });
 
       return res.json({
         success: true,

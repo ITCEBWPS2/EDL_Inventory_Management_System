@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { Button } from './Button';
+import { safeNode } from '../../utils/safeNode';
 
 export const RecordModal = ({
   isOpen,
@@ -12,49 +15,145 @@ export const RecordModal = ({
   maxWidth = 'max-w-xl',
   submitDisabled = false
 }) => {
+  const modalRef = useRef(null);
+  const openerRef = useRef(null);
+  const isBackdropMouseDownRef = useRef(false);
+
+  // Lock body scroll and capture previous active element
+  useEffect(() => {
+    if (!isOpen) return;
+
+    openerRef.current = document.activeElement;
+    const originalOverflow = document.body.style.overflow;
+    const originalPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.paddingRight = originalPaddingRight;
+      if (openerRef.current && typeof openerRef.current.focus === 'function') {
+        openerRef.current.focus();
+      }
+    };
+  }, [isOpen]);
+
+  // Escape key & focus trap
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        const focusableArr = Array.from(focusables).filter(
+          (el) => !el.disabled && el.offsetParent !== null
+        );
+
+        if (focusableArr.length === 0) return;
+
+        const first = focusableArr[0];
+        const last = focusableArr[focusableArr.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  const handleBackdropMouseDown = (e) => {
+    isBackdropMouseDownRef.current = (e.target === e.currentTarget);
+  };
+
+  const handleBackdropMouseUp = (e) => {
+    if (e.target !== e.currentTarget) {
+      isBackdropMouseDownRef.current = false;
+    }
+  };
+
+  const handleBackdropClick = (e) => {
+    if (isBackdropMouseDownRef.current && e.target === e.currentTarget) {
+      onClose();
+    }
+    isBackdropMouseDownRef.current = false;
+  };
+
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in">
-      <div className={`bg-card rounded-xl border border-line shadow-modal w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden animate-scale-up`}>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-ink/60 backdrop-blur-xs overflow-y-auto no-print animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="record-modal-title"
+      onMouseDown={handleBackdropMouseDown}
+      onMouseUp={handleBackdropMouseUp}
+      onClick={handleBackdropClick}
+    >
+      <div
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`bg-card rounded-xl border border-line shadow-modal w-full ${maxWidth} max-h-[calc(100vh-32px)] max-h-[calc(100dvh-32px)] flex flex-col overflow-hidden m-auto shrink-0 animate-scale-up`}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-line bg-surface/50">
-          <h2 className="text-base font-semibold text-ink">{title}</h2>
-          <button
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-line bg-surface/50 shrink-0">
+          <h2 id="record-modal-title" className="text-base font-semibold text-ink">
+            {safeNode(title, '')}
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
-            className="p-1 rounded text-slate hover:text-ink hover:bg-surface transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+            aria-label="Close dialog"
+            title="Close"
+            icon={X}
+          />
         </div>
 
         {/* Scrollable Form Content */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          {children}
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1 min-h-0">
+          {safeNode(children, null)}
         </div>
 
         {/* Actions Footer */}
-        <div className="p-4 border-t border-line bg-surface/50 flex items-center justify-end gap-3">
-          <button
-            type="button"
+        <div className="p-4 border-t border-line bg-surface/50 flex items-center justify-end gap-2.5 shrink-0">
+          <Button
+            variant="secondary"
+            size="regular"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-slate hover:text-ink bg-card hover:bg-surface border border-line rounded transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
+            label="Cancel"
+          />
+          <Button
+            variant="primary"
+            size="regular"
             onClick={onSubmit}
             disabled={loading || submitDisabled}
-            className="px-5 py-2 text-xs font-medium text-white bg-ink hover:bg-[#193254] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-subtle"
-          >
-            {loading ? (
-              <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-            ) : null}
-            {submitLabel}
-          </button>
+            loading={loading}
+            label={submitLabel}
+          />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

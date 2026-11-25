@@ -1,4 +1,5 @@
 const db = require('../services/db');
+const auditLogger = require('../services/auditLogger');
 
 const verificationController = {
   async getVerifications(req, res) {
@@ -213,7 +214,7 @@ const verificationController = {
 
   async discardDraft(req, res) {
     try {
-      const { unit_id } = req.query;
+      const unit_id = req.query.unit_id || req.body?.unit_id;
       if (!unit_id) {
         return res.status(400).json({ success: false, message: 'unit_id is required.' });
       }
@@ -226,6 +227,20 @@ const verificationController = {
       }
 
       const discarded = await db.discardDraft(unit_id);
+
+      if (discarded) {
+        await auditLogger.log({
+          action: 'DISCARD',
+          module: 'Verification',
+          status: 'success',
+          entity_type: 'VerificationDraft',
+          unit_id,
+          description: `${req.user.full_name} (${req.user.role}) discarded draft verification`,
+          req,
+          res
+        });
+      }
+
       return res.json({
         success: true,
         message: discarded ? 'Draft verification discarded successfully.' : 'No active draft found to discard.'
@@ -233,6 +248,33 @@ const verificationController = {
     } catch (error) {
       console.error('Discard draft error:', error);
       return res.status(500).json({ success: false, message: 'Failed to discard draft verification.' });
+    }
+  },
+
+  async clearDraftTestItems(req, res) {
+    try {
+      const unit_id = req.query.unit_id || req.body?.unit_id;
+      if (!unit_id) {
+        return res.status(400).json({ success: false, message: 'unit_id is required.' });
+      }
+
+      if (req.user.role !== 'super_admin' && req.user.role !== 'local_admin') {
+        const authorized = req.user.unitIds || [];
+        if (!authorized.includes(unit_id)) {
+          return res.status(403).json({ success: false, message: 'Access Denied for this unit.' });
+        }
+      }
+
+      const result = await db.clearDraftTestItems(unit_id);
+      return res.json({
+        success: true,
+        clearedCount: result.clearedCount,
+        remainingCount: result.remainingCount,
+        message: `Cleared ${result.clearedCount} test items from draft.`
+      });
+    } catch (error) {
+      console.error('Clear draft test items error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to clear draft test items.' });
     }
   },
 
@@ -305,10 +347,24 @@ const verificationController = {
         items: verificationItems
       });
 
+      await auditLogger.log({
+        action: isConfirmed ? 'CONFIRM' : 'SUBMIT',
+        module: 'Verification',
+        status: 'success',
+        entity_type: 'Verification',
+        entity_id: newVerif.id,
+        entity_reference: newVerif.date,
+        unit_id: newVerif.unit_id,
+        description: `${req.user.full_name} (${req.user.role}) ${isConfirmed ? 'confirmed' : 'submitted'} annual verification (${newVerif.year}) for unit`,
+        changes: auditLogger.snapshot(newVerif),
+        req,
+        res
+      });
+
       return res.status(201).json({
         success: true,
-        message: isConfirmed 
-          ? 'Annual verification confirmed and permanently saved.' 
+        message: isConfirmed
+          ? 'Annual verification confirmed and permanently saved.'
           : 'Annual verification drafted successfully.',
         data: newVerif
       });
@@ -371,6 +427,21 @@ const verificationController = {
       }
 
       const confirmed = await db.confirmVerification(id, req.user.id);
+
+      await auditLogger.log({
+        action: 'CONFIRM',
+        module: 'Verification',
+        status: 'success',
+        entity_type: 'Verification',
+        entity_id: confirmed.id,
+        entity_reference: confirmed.date,
+        unit_id: existing.unit_id,
+        description: `${req.user.full_name} (${req.user.role}) confirmed annual verification (${confirmed.year})`,
+        changes: auditLogger.diff(existing, confirmed),
+        req,
+        res
+      });
+
       return res.json({
         success: true,
         message: 'Annual verification confirmed and permanently locked for audit.',
@@ -497,6 +568,20 @@ const verificationController = {
         verification_id: verification_id || null
       });
 
+      await auditLogger.log({
+        action: 'CREATE',
+        module: 'Issued/Destroyed',
+        status: 'success',
+        entity_type: 'IssuedDestroyedItem',
+        entity_id: record.id,
+        entity_reference: record.serial_number || record.disposition,
+        unit_id: record.unit_id,
+        description: `${req.user.full_name} (${req.user.role}) recorded write-off/disposition: ${record.quantity}x (${record.disposition})`,
+        changes: auditLogger.snapshot(record),
+        req,
+        res
+      });
+
       return res.status(201).json({
         success: true,
         message: 'Item write-off / issued / destroyed recorded successfully.',
@@ -567,6 +652,20 @@ const verificationController = {
         verification_id: verification_id !== undefined ? verification_id : existing.verification_id
       });
 
+      await auditLogger.log({
+        action: 'UPDATE',
+        module: 'Issued/Destroyed',
+        status: 'success',
+        entity_type: 'IssuedDestroyedItem',
+        entity_id: updated.id,
+        entity_reference: updated.serial_number || updated.disposition,
+        unit_id: updated.unit_id,
+        description: `${req.user.full_name} (${req.user.role}) updated write-off/disposition (${updated.id})`,
+        changes: auditLogger.diff(existing, updated),
+        req,
+        res
+      });
+
       return res.json({
         success: true,
         message: 'Record updated successfully.',
@@ -597,6 +696,20 @@ const verificationController = {
       if (!deleted) {
         return res.status(500).json({ success: false, message: 'Failed to delete record.' });
       }
+
+      await auditLogger.log({
+        action: 'DELETE',
+        module: 'Issued/Destroyed',
+        status: 'success',
+        entity_type: 'IssuedDestroyedItem',
+        entity_id: id,
+        entity_reference: existing.serial_number || existing.disposition,
+        unit_id: existing.unit_id,
+        description: `${req.user.full_name} (${req.user.role}) deleted write-off/disposition (${id})`,
+        changes: auditLogger.snapshot(existing),
+        req,
+        res
+      });
 
       return res.json({
         success: true,

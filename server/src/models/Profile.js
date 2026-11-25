@@ -12,9 +12,8 @@ const ProfileSchema = new mongoose.Schema(
     username: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
-      index: true
+      lowercase: true
     },
     full_name: {
       type: String,
@@ -24,10 +23,8 @@ const ProfileSchema = new mongoose.Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
-      lowercase: true,
-      index: true
+      lowercase: true
     },
     role: {
       type: String,
@@ -37,7 +34,7 @@ const ProfileSchema = new mongoose.Schema(
     permission_level: {
       type: String,
       default: null,
-      enum: ['read_write', 'read_only', 'no_permission', null]
+      enum: ['read_write', 'read_only', 'no_permission', 'disposal_only', null]
     },
     contact_info: {
       type: String,
@@ -70,6 +67,15 @@ const ProfileSchema = new mongoose.Schema(
       }
     }
   }
+);
+
+ProfileSchema.index(
+  { email: 1 },
+  { unique: true, collation: { locale: 'en', strength: 2 } }
+);
+ProfileSchema.index(
+  { username: 1 },
+  { unique: true, collation: { locale: 'en', strength: 2 } }
 );
 
 // Virtual property for backward compatibility with profile.passwordHash

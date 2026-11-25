@@ -1,5 +1,6 @@
 import React from 'react';
 import { Printer, X, CheckSquare } from 'lucide-react';
+import { Button } from '../common/Button';
 
 /**
  * Sticky action bar displayed when one or more serial numbers are selected
@@ -33,39 +34,39 @@ export const PrintLabelsActionBar = ({
 
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {canSelectMoreInList && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="small"
             id="btn-select-all-filtered-serials"
             onClick={onSelectAllFiltered}
-            className="px-2.5 py-1.5 rounded-lg bg-surface/10 hover:bg-surface/20 text-signal hover:text-signal-light text-xs font-medium transition-colors flex items-center gap-1.5"
             title={`Select all ${totalFilteredCount} serial numbers in current filtered list`}
-          >
-            <CheckSquare className="w-3.5 h-3.5" />
-            <span>Select all {totalFilteredCount} in this list</span>
-          </button>
+            icon={CheckSquare}
+            label={`Select all ${totalFilteredCount} in this list`}
+            className="!text-signal hover:!text-signal-light !bg-surface/10 hover:!bg-surface/20 border-0"
+          />
         )}
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="small"
           id="btn-clear-serial-selection"
           onClick={onClear}
-          className="px-2.5 py-1.5 rounded-lg bg-transparent hover:bg-surface/10 text-slate-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1"
           title="Clear selected serials"
-        >
-          <X className="w-3.5 h-3.5" />
-          <span>Clear selection</span>
-        </button>
+          icon={X}
+          label="Clear selection"
+          className="!text-slate-300 hover:!text-white hover:!bg-surface/10 border-0"
+        />
 
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="regular"
           id="btn-print-selected-labels"
           onClick={onPrint}
-          className="px-4 py-1.5 rounded-xl bg-signal hover:bg-signal-hover text-ink font-bold text-xs transition-all shadow-md hover:shadow-lg flex items-center gap-1.5 active:scale-95"
           title="Open print labels dialog for selected serials"
-        >
-          <Printer className="w-4 h-4 text-ink" />
-          <span>Print Labels</span>
-        </button>
+          icon={Printer}
+          label="Print Labels"
+          className="!bg-[#f6c026] !text-[#280818] hover:!bg-[#e5af1d] !border-0 font-bold shadow-md"
+        />
       </div>
     </div>
   );

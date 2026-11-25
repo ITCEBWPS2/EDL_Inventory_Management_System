@@ -13,8 +13,19 @@ const verificationsRoutes = require('./routes/verifications.routes');
 const reportsRoutes = require('./routes/reports.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const vouchersRoutes = require('./routes/vouchers.routes');
+const auditLogsRoutes = require('./routes/auditLogs.routes');
+const disposalRequestsRoutes = require('./routes/disposalRequests.routes');
+const notificationsRoutes = require('./routes/notifications.routes');
+const auditMiddleware = require('./middleware/auditMiddleware');
 
 const app = express();
+
+// Configure trust proxy based on TRUST_PROXY environment setting
+if (env.TRUST_PROXY !== false && env.TRUST_PROXY !== undefined) {
+  app.set('trust proxy', env.TRUST_PROXY);
+} else {
+  app.set('trust proxy', false);
+}
 
 // Dynamic CORS configuration supporting multi-origin lists and dev localhost wildcard
 const corsOptions = {
@@ -52,6 +63,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+app.use(auditMiddleware);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -73,6 +85,14 @@ app.use('/api/verifications', verificationsRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/vouchers', vouchersRoutes);
+app.post('/api/audit-logs/client-error', (req, res) => {
+  console.error('[CLIENT ERROR LOGGED]:', JSON.stringify(req.body, null, 2));
+  res.json({ success: true });
+});
+app.use('/api/audit-logs', auditLogsRoutes);
+app.use('/api/disposal-requests', disposalRequestsRoutes);
+app.use('/api/disposal', disposalRequestsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // 404 Handler
 app.use((req, res) => {
@@ -84,6 +104,21 @@ app.use((req, res) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    const env = require('./config/env');
+    return res.status(413).json({
+      success: false,
+      error: 'LIMIT_FILE_SIZE',
+      message: `File is too large. Maximum allowed size is ${env.ATTACHMENT_MAX_KB} KB.`
+    });
+  }
+  if (err && err.code === 'INVALID_FILE_TYPE') {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_FILE_TYPE',
+      message: err.message || 'Invalid file type. Only JPG, PNG, and WebP images are allowed.'
+    });
+  }
   console.error('Unhandled server error:', err);
   res.status(err.status || 500).json({
     success: false,

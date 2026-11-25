@@ -57,7 +57,9 @@ export const api = {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      const err = new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      err.retryAfter = res.headers ? res.headers.get('Retry-After') : null;
+      throw err;
     }
     return data;
   },
@@ -71,7 +73,9 @@ export const api = {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      const err = new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      err.retryAfter = res.headers ? res.headers.get('Retry-After') : null;
+      throw err;
     }
     return data;
   },
@@ -85,7 +89,9 @@ export const api = {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      const err = new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      err.retryAfter = res.headers ? res.headers.get('Retry-After') : null;
+      throw err;
     }
     return data;
   },
@@ -99,20 +105,33 @@ export const api = {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      const err = new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      err.retryAfter = res.headers ? res.headers.get('Retry-After') : null;
+      throw err;
     }
     return data;
   },
 
-  async delete(endpoint) {
-    const res = await fetch(`${API_URL}${endpoint}`, {
+  async delete(endpoint, params = {}) {
+    const url = new URL(`${API_URL}${endpoint}`);
+    if (params && typeof params === 'object') {
+      Object.keys(params).forEach(key => {
+        if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+          url.searchParams.append(key, params[key]);
+        }
+      });
+    }
+
+    const res = await fetch(url.toString(), {
       method: 'DELETE',
       headers: getHeaders()
     });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      const err = new ApiError(data.message || `Request failed with status ${res.status}`, res.status, data);
+      err.retryAfter = res.headers ? res.headers.get('Retry-After') : null;
+      throw err;
     }
     return data;
   }

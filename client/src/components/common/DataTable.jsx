@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Plus, Filter, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown, Printer } from 'lucide-react';
+import { EditButton, DeleteButton } from '../ui/ActionButtons';
+import { Button } from './Button';
+import { TablePagination } from './TablePagination';
 import { IndeterminateCheckbox } from './IndeterminateCheckbox';
 import { PrintLabelsActionBar } from '../inventory/PrintLabelsActionBar';
 import { PrintLabelsModal } from '../inventory/PrintLabelsModal';
@@ -69,8 +72,13 @@ export const DataTable = ({
   const filteredData = useMemo(() => {
     return data.filter(row => {
       // Filter by dropdown
-      if (selectedFilter && filterKey && row[filterKey] !== selectedFilter) {
-        return false;
+      if (selectedFilter && filterKey) {
+        if (filterKey === 'type') {
+          const typeVal = String(row.sub_classification || row.item_name || '').toLowerCase();
+          if (typeVal !== selectedFilter.toLowerCase()) return false;
+        } else if (row[filterKey] !== selectedFilter) {
+          return false;
+        }
       }
       // Search query
       if (searchTerm) {
@@ -258,16 +266,54 @@ export const DataTable = ({
       : searchPlaceholder;
 
   const showActionsColumn = Boolean(onEdit || onDelete || enableSerialSelection);
+  const actionsColWidth = enableSerialSelection ? 200 : (onEdit && onDelete ? 100 : 70);
   const totalColSpan = columns.length + (expandColumn ? 1 : 0) + (enableSerialSelection ? 1 : 0) + (showActionsColumn ? 1 : 0);
 
+  // Helper to resolve clean, collapse-proof column widths
+  const resolveColWidth = (col) => {
+    if (typeof col.width === 'number') return col.width;
+    if (typeof col.width === 'string' && col.width.endsWith('px')) {
+      const parsed = parseInt(col.width, 10);
+      if (!isNaN(parsed)) return parsed;
+    }
+    const h = (typeof col.header === 'string' ? col.header : '').toLowerCase();
+    const a = (typeof col.accessor === 'string' ? col.accessor : '').toLowerCase();
+    if (h === 'no.' || h === 'no' || a === '_seq_no' || a === 'index') return 56;
+    if (h.includes('serial no') || a === 'item_code') return 400;
+    if (h.includes('manufacturer') || a === 'serial_number') return 150;
+    if (h.includes('type') || a === 'sub_classification') return 170;
+    if (h.includes('category') || a === 'category') return 170;
+    if (h.includes('brand') || a === 'brand') return 130;
+    if (h.includes('description') || h.includes('item name') || a === 'description' || a === 'item_name') return 220;
+    if (h.includes('quantity') || h === 'qty' || a === 'quantity') return 90;
+    if (h.includes('unit') || h.includes('location') || a === 'unit_name' || a === 'location') return 120;
+    if (h.includes('status') || a === 'status' || a === 'account_status') return 110;
+    return 140;
+  };
+
+  const resolveColMinWidth = (col) => {
+    if (typeof col.minWidth === 'number') return col.minWidth;
+    if (typeof col.minWidth === 'string' && col.minWidth.endsWith('px')) {
+      const parsed = parseInt(col.minWidth, 10);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return resolveColWidth(col);
+  };
+
+  const totalTableMinWidth =
+    (enableSerialSelection ? 44 : 0) +
+    (expandColumn ? 40 : 0) +
+    columns.reduce((sum, col) => sum + resolveColMinWidth(col), 0) +
+    (showActionsColumn ? actionsColWidth : 0);
+
   return (
-    <div className="relative bg-card rounded-xl border border-line shadow-card overflow-hidden">
+    <div className="relative content-card bg-card rounded-xl border border-line shadow-card overflow-hidden">
       {/* Top Filter & Search Bar */}
-      <div className="p-4 border-b border-line flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface/50 no-print">
+      <div className="p-4 border-b border-[rgba(27,27,36,0.10)] flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/70 no-print">
         <div className="flex items-center gap-3 w-full sm:w-auto flex-1">
           {/* Search box */}
           <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate" />
             <input
               type="text"
               placeholder={dynamicPlaceholder}
@@ -276,7 +322,7 @@ export const DataTable = ({
                 setSearchTerm(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-card border border-line rounded focus:outline-none focus:border-signal text-ink placeholder-slate shadow-subtle"
+              className="w-full pl-9 pr-3 h-[30px] text-xs bg-card border border-line rounded-lg focus:outline-none focus:border-[#7a1a3c] focus:ring-1 focus:ring-[#7a1a3c]/30 text-ink placeholder-slate shadow-subtle transition-all"
             />
           </div>
 
@@ -290,7 +336,7 @@ export const DataTable = ({
                   setSelectedSearchField(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
+                className="h-[30px] text-xs bg-card border border-line rounded-lg px-2.5 pr-7 appearance-none focus:outline-none focus:border-[#7a1a3c] focus:ring-1 focus:ring-[#7a1a3c]/30 text-ink font-medium shadow-subtle cursor-pointer hover:border-slate/50 transition-colors"
                 title="Filter search by field"
               >
                 {searchFieldOptions.map(opt => (
@@ -299,7 +345,7 @@ export const DataTable = ({
                   </option>
                 ))}
               </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
+              <Filter className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
             </div>
           )}
 
@@ -313,7 +359,7 @@ export const DataTable = ({
                   if (onFilterChange) onFilterChange(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="text-xs bg-card border border-line rounded py-2 px-3 pr-8 appearance-none focus:outline-none focus:border-signal text-ink font-medium shadow-subtle cursor-pointer"
+                className="h-[30px] text-xs bg-card border border-line rounded-lg px-2.5 pr-7 appearance-none focus:outline-none focus:border-[#7a1a3c] focus:ring-1 focus:ring-[#7a1a3c]/30 text-ink font-medium shadow-subtle cursor-pointer"
               >
                 <option value="">All Categories / Units</option>
                 {filterOptions.map(opt => (
@@ -322,7 +368,7 @@ export const DataTable = ({
                   </option>
                 ))}
               </select>
-              <Filter className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
+              <Filter className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate pointer-events-none" />
             </div>
           )}
         </div>
@@ -332,14 +378,45 @@ export const DataTable = ({
         </div>
       </div>
 
-      {/* Table Container */}
+      {/* Table Container with Horizontal Scrolling */}
       <div className="overflow-x-auto w-full min-h-[300px]">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b border-line bg-surface/80 text-[11px] font-semibold text-slate tracking-wider uppercase">
+        <table
+          className="w-full text-left border-collapse"
+          style={{
+            tableLayout: 'fixed',
+            minWidth: `${totalTableMinWidth}px`
+          }}
+        >
+          <colgroup>
+            {enableSerialSelection && (
+              <col style={{ width: '44px', minWidth: '44px' }} />
+            )}
+            {expandColumn && (
+              <col style={{ width: '40px', minWidth: '40px' }} />
+            )}
+            {columns.map((col, idx) => {
+              const w = resolveColWidth(col);
+              const minW = resolveColMinWidth(col);
+              return <col key={idx} style={{ width: `${w}px`, minWidth: `${minW}px` }} />;
+            })}
+            {showActionsColumn && (
+              <col style={{ width: `${actionsColWidth}px`, minWidth: `${actionsColWidth}px` }} />
+            )}
+          </colgroup>
+          <thead className="sticky top-0 z-10 bg-white">
+            <tr className="border-b border-[rgba(27,27,36,0.10)] bg-white text-[11.5px] font-semibold text-[#4A4D5A] tracking-[0.04em] uppercase">
               {/* Checkbox Column */}
               {enableSerialSelection && (
-                <th className="py-3 px-3 w-10 text-center shrink-0">
+                <th
+                  className="py-2.5 px-3 text-center shrink-0"
+                  style={{
+                    width: '44px',
+                    minWidth: '44px',
+                    backgroundColor: '#ffffff',
+                    verticalAlign: 'bottom',
+                    padding: '10px 12px'
+                  }}
+                >
                   <IndeterminateCheckbox
                     checked={isCurrentPageAllSelected}
                     indeterminate={isCurrentPageSomeSelected && !isCurrentPageAllSelected}
@@ -351,34 +428,82 @@ export const DataTable = ({
               )}
 
               {expandColumn && (
-                <th className="py-3 px-2 w-10 text-center"></th>
+                <th
+                  className="py-2.5 px-2 text-center"
+                  style={{
+                    width: '40px',
+                    minWidth: '40px',
+                    backgroundColor: '#ffffff',
+                    verticalAlign: 'bottom',
+                    padding: '10px 12px'
+                  }}
+                ></th>
               )}
 
-              {columns.map((col, idx) => (
-                <th
-                  key={idx}
-                  className={`py-3 px-4 ${idx === 0 && !expandColumn && !enableSerialSelection ? 'sticky-col bg-surface/90' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
-                >
-                  {col.header}
-                </th>
-              ))}
+              {columns.map((col, idx) => {
+                const w = resolveColWidth(col);
+                const minW = resolveColMinWidth(col);
+                return (
+                  <th
+                    key={idx}
+                    style={{
+                      width: `${w}px`,
+                      minWidth: `${minW}px`,
+                      backgroundColor: '#ffffff',
+                      whiteSpace: 'normal',
+                      wordBreak: 'normal',
+                      overflowWrap: 'normal',
+                      hyphens: 'none',
+                      lineHeight: 1.25,
+                      padding: '10px 12px',
+                      verticalAlign: 'bottom',
+                      fontSize: '11.5px',
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase'
+                    }}
+                    className={`font-semibold text-[#4A4D5A] ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}`}
+                    title={col.title || (typeof col.header === 'string' ? col.header : undefined)}
+                  >
+                    {col.header}
+                  </th>
+                );
+              })}
 
               {showActionsColumn && (
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th
+                  style={{
+                    width: `${actionsColWidth}px`,
+                    minWidth: `${actionsColWidth}px`,
+                    backgroundColor: '#ffffff',
+                    whiteSpace: 'nowrap',
+                    wordBreak: 'normal',
+                    overflowWrap: 'normal',
+                    hyphens: 'none',
+                    lineHeight: 1.25,
+                    padding: '10px 12px',
+                    verticalAlign: 'bottom',
+                    fontSize: '11.5px',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase'
+                  }}
+                  className="font-semibold text-[#4A4D5A] text-right"
+                >
+                  ACTIONS
+                </th>
               )}
             </tr>
           </thead>
           <tbody className="divide-y divide-line text-xs text-ink">
             {loading ? (
               <tr>
-                <td colSpan={totalColSpan} className="py-12 text-center text-slate">
+                <td colSpan={totalColSpan} className="py-10 text-center text-slate">
                   <div className="inline-block w-6 h-6 border-2 border-slate/30 border-t-ink rounded-full animate-spin mb-2"></div>
                   <div>Loading operational records...</div>
                 </td>
               </tr>
             ) : paginatedData.length === 0 ? (
               <tr>
-                <td colSpan={totalColSpan} className="py-12 text-center text-slate">
+                <td colSpan={totalColSpan} className="py-10 text-center text-slate">
                   {emptyMessage}
                 </td>
               </tr>
@@ -402,7 +527,7 @@ export const DataTable = ({
                     >
                       {/* Checkbox Cell */}
                       {enableSerialSelection && (
-                        <td className="py-3 px-3 text-center shrink-0 w-10">
+                        <td className="py-2.5 px-3 text-center shrink-0 w-10 align-top">
                           <IndeterminateCheckbox
                             checked={isRowChecked}
                             indeterminate={batchStatus === 'indeterminate'}
@@ -421,7 +546,7 @@ export const DataTable = ({
                       )}
 
                       {expandColumn && (
-                        <td className="py-3 px-2 text-center shrink-0 w-10">
+                        <td className="py-2.5 px-2 text-center shrink-0 w-10 align-top">
                           {canExpand ? (
                             <button
                               type="button"
@@ -429,11 +554,11 @@ export const DataTable = ({
                                 e.stopPropagation();
                                 toggleRowExpand(rowKey);
                               }}
-                              className={`p-1 rounded hover:bg-surface text-slate hover:text-signal transition-transform duration-150 inline-flex items-center justify-center ${isExpanded ? 'rotate-90 text-signal font-bold' : ''
+                              className={`w-[26px] h-[26px] rounded-[7px] hover:bg-surface text-slate hover:text-signal transition-transform duration-150 inline-flex items-center justify-center ${isExpanded ? 'rotate-90 text-signal font-bold' : ''
                                 }`}
                               title={isExpanded ? 'Collapse batch serials' : 'Expand batch serials'}
                             >
-                              <ChevronRight className="w-4 h-4" />
+                              <ChevronRight className="w-3.5 h-3.5" />
                             </button>
                           ) : (
                             <span className="w-4 inline-block" />
@@ -444,10 +569,7 @@ export const DataTable = ({
                       {columns.map((col, colIdx) => (
                         <td
                           key={colIdx}
-                          className={`py-3 px-4 ${colIdx === 0 && !renderExpandedRow && !enableSerialSelection
-                              ? 'sticky-col bg-card group-hover:bg-surface/90 font-medium'
-                              : ''
-                            } ${col.tabular ? 'tabular-nums' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
+                          className={`py-2.5 px-3.5 align-top ${col.tabular ? 'tabular-nums' : ''} ${col.align === 'right' ? 'text-right' : ''}`}
                         >
                           {col.render
                             ? col.render(row, globalRowIdx, {
@@ -460,41 +582,42 @@ export const DataTable = ({
                       ))}
 
                       {showActionsColumn && (
-                        <td className="py-3 px-4 text-right shrink-0 whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
+                        <td
+                          style={{ width: `${actionsColWidth}px`, minWidth: `${actionsColWidth}px` }}
+                          className="py-2.5 px-3.5 text-right shrink-0 whitespace-nowrap align-top"
+                        >
+                          <div className="flex items-center justify-end gap-1.5 flex-nowrap">
                             {/* Print Label(s) Button */}
                             {enableSerialSelection && (
                               isBatch ? (
-                                <button
-                                  type="button"
+                                <Button
+                                  variant="secondary"
+                                  size="small"
                                   onClick={() => handlePrintBatch(row)}
                                   title="Print all labels for this batch"
-                                  className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
                                   aria-label="Print all labels for this batch"
-                                >
-                                  <Printer className="w-3.5 h-3.5" />
-                                </button>
+                                  icon={Printer}
+                                  label={<span className="hidden sm:inline">Print Batch</span>}
+                                />
                               ) : row.item_code?.trim() ? (
-                                <button
-                                  type="button"
+                                <Button
+                                  variant="secondary"
+                                  size="small"
                                   onClick={() => handlePrintSingle(row)}
                                   title="Print serial label"
-                                  className="p-1.5 rounded hover:bg-surface text-slate hover:text-signal transition-colors"
                                   aria-label="Print serial label"
-                                >
-                                  <Printer className="w-3.5 h-3.5" />
-                                </button>
+                                  icon={Printer}
+                                  label={<span className="hidden sm:inline">Print Label</span>}
+                                />
                               ) : null
                             )}
 
                             {onEdit && (
-                              <button
+                              <EditButton
                                 onClick={() => onEdit(row)}
                                 title="Edit"
-                                className="p-1.5 rounded hover:bg-surface text-slate hover:text-ink transition-colors"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
+                                aria-label={`Edit ${row.item_name || row.full_name || row.unit_name || 'item'}`}
+                              />
                             )}
 
                             {onDelete && (() => {
@@ -502,27 +625,20 @@ export const DataTable = ({
                               if (!canDelete) {
                                 if (hideDisabledDelete) return null;
                                 return (
-                                  <button
-                                    type="button"
+                                  <DeleteButton
                                     disabled
-                                    aria-disabled="true"
                                     title="You cannot delete this item"
-                                    className="p-1.5 rounded text-slate/30 cursor-not-allowed opacity-40"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                    aria-label="Cannot delete item"
+                                  />
                                 );
                               }
                               const tooltipText = typeof deleteTooltip === 'function' ? deleteTooltip(row) : deleteTooltip;
                               return (
-                                <button
-                                  type="button"
+                                <DeleteButton
                                   onClick={() => onDelete(row)}
                                   title={tooltipText || 'Delete'}
-                                  className="p-1.5 rounded hover:bg-[#B4483A]/10 text-[#B4483A] hover:text-[#96382C] transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                  aria-label={`${tooltipText || 'Delete'} ${row.item_name || row.full_name || row.unit_name || 'item'}`}
+                                />
                               );
                             })()}
                           </div>
@@ -566,28 +682,15 @@ export const DataTable = ({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-3 border-t border-line flex items-center justify-between text-xs text-slate bg-surface/40 no-print">
-        <div>
-          Page <span className="font-semibold text-ink tabular-nums">{safeCurrentPage}</span> of{' '}
-          <span className="font-semibold text-ink tabular-nums">{totalPages}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={safeCurrentPage === 1}
-            className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={safeCurrentPage >= totalPages}
-            className="p-1.5 rounded border border-line bg-card hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+      {totalPages > 1 && (
+        <TablePagination
+          totalItems={filteredData.length}
+          page={safeCurrentPage}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          className="border-t border-line bg-surface/40"
+        />
+      )}
 
       {/* Sticky Action Bar */}
       {enableSerialSelection && (
