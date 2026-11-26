@@ -21,6 +21,13 @@ import {
   generateVerificationTestData,
   clearTestGeneratedData
 } from '../utils/verificationTestHelper';
+import { CountSheetOptionsModal } from '../components/verification/CountSheetOptionsModal';
+import { PrintableCountSheet } from '../components/verification/PrintableCountSheet';
+import {
+  buildCountSheetData,
+  getStoredCountSheetOptions
+} from '../utils/countSheetBuilder';
+import { downloadCountSheetDocx } from '../utils/countSheetDocxGenerator';
 import {
   MapPin,
   ClipboardCheck,
@@ -259,7 +266,7 @@ const VerificationRow = memo(({
         </div>
       </td>
 
-      {/* 10. Label No (text input, placeholder "VL-0000") */}
+      {/* 10. Verification Label No (text input, placeholder "VL-0000") */}
       <td className="py-2.5 px-3 align-top min-w-[95px] whitespace-nowrap">
         <input
           type="text"
@@ -345,7 +352,7 @@ const VerificationRow = memo(({
 });
 
 export const NewVerification = () => {
-  const { user, selectedUnitId, selectedUnit } = useAuth();
+  const { user, selectedUnitId, selectedUnit, systemUnits } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -432,6 +439,120 @@ export const NewVerification = () => {
   const locationDisplay = selectedUnit?.unit_name
     ? `${selectedUnit.unit_name}${selectedUnit.unit_code ? ` (${selectedUnit.unit_code})` : ''}`
     : 'All Units (CSC_HOMAGAMA)';
+
+  // Count Sheet State & Handlers (Print & Word .docx)
+  const [isCountSheetModalOpen, setIsCountSheetModalOpen] = useState(false);
+  const [countSheetRenderData, setCountSheetRenderData] = useState(null);
+  const [isPrintingCountSheet, setIsPrintingCountSheet] = useState(false);
+
+  const countSheetUnitName = useMemo(() => {
+    if (selectedUnit?.unit_name) return selectedUnit.unit_name;
+    if (selectedUnitId && selectedUnitId !== 'all') {
+      const found = (systemUnits || []).find(u => u.id === selectedUnitId);
+      if (found) return found.unit_name || found.unit_code || selectedUnitId;
+    }
+    return locationDisplay || 'All Units';
+  }, [selectedUnit, selectedUnitId, systemUnits, locationDisplay]);
+
+  const handleOpenCountSheet = () => {
+    if (selectedUnitId === 'all') {
+      toast.info('Please select a specific operational unit to generate a verification count sheet.');
+      return;
+    }
+    if (!items || items.length === 0) {
+      toast.error('No inventory items found for this unit.');
+      return;
+    }
+    setIsCountSheetModalOpen(true);
+  };
+
+  const handlePrintCountSheet = (selectedOptions, sheetData) => {
+    setIsCountSheetModalOpen(false);
+
+    try {
+      api.post('/audit-logs/log-action', {
+        action: 'PRINT',
+        module: 'Verification',
+        entity_type: 'CountSheet',
+        description: `Printed verification count sheet (${countSheetUnitName}, ${sheetData.totalItems} items, scope: ${selectedOptions.scope}, format: print)`
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('Audit log error:', err);
+    }
+
+    setCountSheetRenderData(sheetData);
+    setIsPrintingCountSheet(true);
+
+    const styleId = 'verification-count-sheet-print-style';
+    const existing = document.getElementById(styleId);
+    if (existing) existing.remove();
+
+    const styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    styleEl.textContent = `
+      @page {
+        size: A4 landscape !important;
+        margin: 10mm !important;
+      }
+      body.printing-verification-count-sheet * {
+        visibility: hidden !important;
+      }
+      body.printing-verification-count-sheet #verification-count-sheet-print-area,
+      body.printing-verification-count-sheet #verification-count-sheet-print-area * {
+        visibility: visible !important;
+      }
+      body.printing-verification-count-sheet #verification-count-sheet-print-area {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        display: block !important;
+      }
+    `;
+    document.head.appendChild(styleEl);
+    document.body.classList.add('printing-verification-count-sheet');
+
+    const cleanup = () => {
+      document.body.classList.remove('printing-verification-count-sheet');
+      const s = document.getElementById(styleId);
+      if (s) s.remove();
+      setIsPrintingCountSheet(false);
+      window.removeEventListener('afterprint', cleanup);
+    };
+
+    window.addEventListener('afterprint', cleanup);
+
+    setTimeout(() => {
+      window.print();
+      setTimeout(cleanup, 2000);
+    }, 100);
+  };
+
+  const handleDownloadCountSheetDocx = async (selectedOptions, sheetData) => {
+    try {
+      api.post('/audit-logs/log-action', {
+        action: 'PRINT',
+        module: 'Verification',
+        entity_type: 'CountSheet',
+        description: `Printed verification count sheet (${countSheetUnitName}, ${sheetData.totalItems} items, scope: ${selectedOptions.scope}, format: docx)`
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('Audit log error:', err);
+    }
+
+    const metadata = {
+      unitName: countSheetUnitName,
+      date,
+      year: String(year),
+      verifier1,
+      verifier2,
+      verifier3
+    };
+
+    await downloadCountSheetDocx(sheetData, metadata);
+    toast.success('Verification count sheet (.docx) downloaded successfully.');
+    setIsCountSheetModalOpen(false);
+  };
 
   // Load items or existing verification record and merge active draft if present
   const loadInitialData = async () => {
@@ -1488,6 +1609,21 @@ export const NewVerification = () => {
                     )}
                   </div>
                 )}
+
+                {/* Print Count Sheet Button (Secondary / Outline Button) */}
+                <Button
+                  variant="secondary"
+                  size="regular"
+                  icon={Printer}
+                  iconSize={15}
+                  onClick={handleOpenCountSheet}
+                  title="Print a blank landscape count sheet"
+                  aria-label="Print a blank landscape count sheet"
+                  className="!h-8 shrink-0"
+                >
+                  <span className="hidden sm:inline">Print Count Sheet</span>
+                  <span className="sm:hidden">Print sheet</span>
+                </Button>
               </div>
 
               {/* Items Counter + "Save all" Button */}
@@ -1581,7 +1717,7 @@ export const NewVerification = () => {
                     <th className="text-center min-w-[85px]" title="Difference" aria-label="Difference" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Difference</th>
                     <th className="text-center min-w-[105px]" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
                     <th className="text-center min-w-[140px] w-[140px]" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
-                    <th className="text-center min-w-[110px]" title="Label No" aria-label="Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No</th>
+                    <th className="text-center min-w-[125px]" title="Verification Label No" aria-label="Verification Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Verification<br />Label No</th>
                     <th className="text-left min-w-[140px]" title="Remarks" aria-label="Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Remarks</th>
                     <th className="text-center min-w-[110px]" title="Actions" aria-label="Actions" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Actions</th>
                   </tr>
@@ -1777,7 +1913,7 @@ export const NewVerification = () => {
                     <th className="text-center min-w-[85px]" title="Difference" aria-label="Difference" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Difference</th>
                     <th className="text-center min-w-[105px]" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
                     <th className="text-center min-w-[140px] w-[140px]" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
-                    <th className="text-center min-w-[110px]" title="Label No" aria-label="Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No</th>
+                    <th className="text-center min-w-[125px]" title="Verification Label No" aria-label="Verification Label No" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Verification<br />Label No</th>
                     <th className="text-left min-w-[140px]" title="Remarks" aria-label="Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Remarks</th>
                     <th className="text-center min-w-[100px]" title="Status" aria-label="Status" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Status</th>
                   </tr>
@@ -2294,6 +2430,38 @@ export const NewVerification = () => {
         </div>,
         document.body
       )}
+
+      {/* Printable Count Sheet (Rendered for Print) */}
+      <PrintableCountSheet
+        countSheetData={countSheetRenderData || buildCountSheetData(items, filteredItems, getStoredCountSheetOptions())}
+        metadata={{
+          unitName: countSheetUnitName,
+          date,
+          year: String(year),
+          verifier1,
+          verifier2,
+          verifier3
+        }}
+      />
+
+      {/* Count Sheet Options Dialog */}
+      <CountSheetOptionsModal
+        isOpen={isCountSheetModalOpen}
+        onClose={() => setIsCountSheetModalOpen(false)}
+        allItems={items}
+        filteredItems={filteredItems}
+        metadata={{
+          unitName: countSheetUnitName,
+          date,
+          year: String(year),
+          verifier1,
+          verifier2,
+          verifier3
+        }}
+        initialOptions={getStoredCountSheetOptions()}
+        onPrint={handlePrintCountSheet}
+        onDownloadDocx={handleDownloadCountSheetDocx}
+      />
       </div>
     </AppShell>
   );

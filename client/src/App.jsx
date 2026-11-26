@@ -18,6 +18,7 @@ import { RemainingInventory } from './pages/RemainingInventory';
 import { TransactionsOverviewPage } from './pages/TransactionsOverviewPage';
 import { AnnualVerificationOverviewPage } from './pages/AnnualVerificationOverviewPage';
 import { NewVerification } from './pages/NewVerification';
+import { VerificationTeamsPage } from './pages/VerificationTeamsPage';
 import { VerificationHistory } from './pages/VerificationHistory';
 import { IssuedDestroyedPage } from './pages/IssuedDestroyedPage';
 import { AddIssuedDestroyedPage } from './pages/AddIssuedDestroyedPage';
@@ -209,6 +210,8 @@ export default function App() {
               {/* 3. Annual Verification */}
               <Route path="/verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
               <Route path="/annual-verification" element={<ProtectedRoute><AnnualVerificationOverviewPage /></ProtectedRoute>} />
+              <Route path="/verification/teams" element={<ProtectedRoute requiredPermission="manage_verification_teams"><VerificationTeamsPage /></ProtectedRoute>} />
+              <Route path="/annual-verification/teams" element={<ProtectedRoute requiredPermission="manage_verification_teams"><VerificationTeamsPage /></ProtectedRoute>} />
               <Route path="/verification/new" element={<ProtectedRoute requiredPermission="add_inventory"><NewVerification /></ProtectedRoute>} />
               <Route path="/verification/history" element={<ProtectedRoute><VerificationHistory /></ProtectedRoute>} />
               <Route path="/verification/issued-destroyed" element={<ProtectedRoute><IssuedDestroyedPage /></ProtectedRoute>} />

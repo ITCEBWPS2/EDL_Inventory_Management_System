@@ -18,6 +18,7 @@ const vouchersRoutes = require('./routes/vouchers.routes');
 const auditLogsRoutes = require('./routes/auditLogs.routes');
 const disposalRequestsRoutes = require('./routes/disposalRequests.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
+const verificationTeamRoutes = require('./routes/verificationTeam.routes');
 const auditMiddleware = require('./middleware/auditMiddleware');
 
 const app = express();
@@ -93,6 +94,7 @@ app.post('/api/audit-logs/client-error', (req, res) => {
 });
 app.use('/api/audit-logs', auditLogsRoutes);
 app.use('/api/disposal-requests', disposalRequestsRoutes);
+app.use('/api/verification-teams', verificationTeamRoutes);
 app.use('/api/disposal', disposalRequestsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 

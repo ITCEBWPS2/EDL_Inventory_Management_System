@@ -15,7 +15,8 @@ const PERMISSION_KEYS = [
   'update_inventory',
   'delete_inventory',
   'view_reports',
-  'manage_permissions'
+  'manage_permissions',
+  'manage_verification_teams'
 ];
 
 const DEFAULT_EMPLOYEE_PERMISSIONS = {
@@ -51,7 +52,8 @@ const DEFAULT_ADMIN_PERMISSIONS = {
   update_inventory: true,
   delete_inventory: true,
   view_reports: true,
-  manage_permissions: true
+  manage_permissions: true,
+  manage_verification_teams: true
 };
 
 const DEFAULT_UNIT_HEAD_PERMISSIONS = {
@@ -148,6 +150,9 @@ async function getPermissionsForUser(user) {
     return { ...DEFAULT_NOPERM_PERMISSIONS };
   }
 
+  // Check for CE (Com) user designation / role
+  const isCeCom = user.role === 'ce_com' || user.username === 'cecom' || (user.full_name && /CE\s*\(Com\)/i.test(user.full_name));
+
   // Super Admin and Local Admin have full permissions
   if (user.role === 'super_admin' || user.role === 'local_admin') {
     return { ...DEFAULT_ADMIN_PERMISSIONS };
@@ -155,27 +160,47 @@ async function getPermissionsForUser(user) {
 
   // Unit Head has full inventory CRUD and reports, but cannot manage user permissions
   if (user.role === 'unit_head') {
-    return { ...DEFAULT_UNIT_HEAD_PERMISSIONS };
+    const base = { ...DEFAULT_UNIT_HEAD_PERMISSIONS };
+    if (isCeCom || user.permissions?.manage_verification_teams) {
+      base.manage_verification_teams = true;
+    }
+    return base;
   }
 
   // Employee role:
   if (user.role === 'employee') {
     if (user.permission_level === 'no_permission' || user.permission_level === 'disposal_only') {
-      return { ...DEFAULT_NOPERM_PERMISSIONS };
+      const base = { ...DEFAULT_NOPERM_PERMISSIONS };
+      if (isCeCom || user.permissions?.manage_verification_teams) {
+        base.manage_verification_teams = true;
+      }
+      return base;
     }
     if (user.permission_level === 'read_only') {
-      return { ...DEFAULT_READONLY_PERMISSIONS };
+      const base = { ...DEFAULT_READONLY_PERMISSIONS };
+      if (isCeCom || user.permissions?.manage_verification_teams) {
+        base.manage_verification_teams = true;
+      }
+      return base;
     }
 
     // Default or read_write: load configured matrix
     const matrix = await getPermissionsMatrix();
-    return {
+    const resolved = {
       ...DEFAULT_EMPLOYEE_PERMISSIONS,
       ...(matrix?.employee || {})
     };
+    if (isCeCom || user.permissions?.manage_verification_teams) {
+      resolved.manage_verification_teams = true;
+    }
+    return resolved;
   }
 
-  return { ...DEFAULT_NOPERM_PERMISSIONS };
+  const fallback = { ...DEFAULT_NOPERM_PERMISSIONS };
+  if (isCeCom || user.permissions?.manage_verification_teams) {
+    fallback.manage_verification_teams = true;
+  }
+  return fallback;
 }
 
 module.exports = {

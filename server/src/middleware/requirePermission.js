@@ -32,9 +32,19 @@ const requirePermission = (requiredPermissions = 'add_inventory') => {
         return next();
       }
 
-      // Unit Head has all operational permissions except manage_permissions
+      // Unit Head has all operational permissions except manage_permissions and manage_verification_teams
       if (req.user.role === 'unit_head') {
         if (permKey === 'manage_permissions') {
+          return res.status(403).json({
+            success: false,
+            message: 'You do not have permission to do this.'
+          });
+        }
+        if (permKey === 'manage_verification_teams') {
+          const userPerms = await permissionService.getPermissionsForUser(req.user);
+          if (userPerms[permKey]) {
+            return next();
+          }
           return res.status(403).json({
             success: false,
             message: 'You do not have permission to do this.'

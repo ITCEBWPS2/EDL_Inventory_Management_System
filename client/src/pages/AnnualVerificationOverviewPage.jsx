@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { HubPage } from '../components/common/HubPage';
-import { ClipboardCheck, ClipboardList, Trash2, History } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, Trash2, History, Users } from 'lucide-react';
 
 export const AnnualVerificationOverviewPage = () => {
   const { canWrite } = useAuth();
@@ -16,6 +16,13 @@ export const AnnualVerificationOverviewPage = () => {
   };
 
   const verificationCards = [
+    {
+      id: 'card-verification-teams',
+      title: 'Verification Teams',
+      description: 'Appoint and manage 3-member verification teams for all operational units.',
+      to: '/verification/teams',
+      icon: Users
+    },
     {
       id: 'card-verification-new',
       title: 'New Verification',

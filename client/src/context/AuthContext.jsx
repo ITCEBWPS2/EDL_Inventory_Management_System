@@ -131,6 +131,7 @@ export const AuthProvider = ({ children }) => {
   const canDeleteInventory = can('delete_inventory');
   const canViewReports = can('view_reports');
   const canManagePermissions = can('manage_permissions');
+  const canManageVerificationTeams = can('manage_verification_teams');
 
   const canWrite = canAddInventory || canUpdateInventory;
   const canRead = canViewInventory;
@@ -166,6 +167,7 @@ export const AuthProvider = ({ children }) => {
         canDeleteInventory,
         canViewReports,
         canManagePermissions,
+        canManageVerificationTeams,
         canWrite,
         canRead,
         canManageTypes,

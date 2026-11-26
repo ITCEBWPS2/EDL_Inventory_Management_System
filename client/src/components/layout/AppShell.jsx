@@ -557,9 +557,9 @@ export const AppShell = ({ children, breadcrumbs = [] }) => {
               id="sidebar-verification-toggle"
               onClick={handleVerificationClick}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-colors group ${
-                isCurrent('/verification') || isCurrent('/annual-verification') || isCurrent('/disposal-requests')
+                isCurrent('/verification') || isCurrent('/annual-verification') || isCurrent('/disposal-requests') || isCurrent('/verification/teams')
                   ? 'bg-white/12 text-[#f6c026] font-semibold border-l-2 border-[#f6c026] pl-2.5'
-                  : isSectionActive(['/verification', '/annual-verification', '/disposal-requests'])
+                  : isSectionActive(['/verification', '/annual-verification', '/disposal-requests', '/verification/teams'])
                   ? 'text-[#f6c026] font-semibold bg-white/5'
                   : 'text-white/85 hover:bg-white/8 hover:text-white'
               }`}
@@ -583,6 +583,18 @@ export const AppShell = ({ children, breadcrumbs = [] }) => {
 
             {expandedSections.verification && (
               <div className="pl-7 pr-2 py-1 space-y-1">
+                {can('manage_verification_teams') && (
+                  <Link
+                    to="/verification/teams"
+                    className={`block py-1.5 px-2 rounded transition-colors ${
+                      location.pathname.startsWith('/verification/teams') || location.pathname.startsWith('/annual-verification/teams')
+                        ? 'bg-white/12 text-[#f6c026] font-medium'
+                        : 'text-white/70 hover:text-white'
+                    }`}
+                  >
+                    Verification Teams
+                  </Link>
+                )}
                 {can('add_inventory') && (
                   <Link
                     to="/verification/new"

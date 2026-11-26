@@ -13,6 +13,7 @@ const AuditLog = require('./AuditLog');
 const ItemType = require('./ItemType');
 const DisposalRequest = require('./DisposalRequest');
 const Notification = require('./Notification');
+const VerificationTeam = require('./VerificationTeam');
 
 /**
  * Strips MongoDB _id and __v from objects or arrays of objects.
@@ -47,5 +48,6 @@ module.exports = {
   ItemType,
   DisposalRequest,
   Notification,
+  VerificationTeam,
   stripMongo
 };

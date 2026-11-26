@@ -207,7 +207,7 @@ export const VerificationHistory = () => {
         'Condition': item.condition && item.condition !== '—' ? item.condition : (!item.is_counted ? 'Not counted' : '—'),
         'Issued / Destroyed': dispStr,
         'Special Remarks': item.remarks && item.remarks !== '—' ? item.remarks : '—',
-        'Label No.': item.label_no && item.label_no !== '—' ? item.label_no : '—'
+        'Verification Label No.': item.label_no && item.label_no !== '—' ? item.label_no : '—'
       };
     });
 
@@ -327,7 +327,7 @@ export const VerificationHistory = () => {
                 <th className="w-[100px] min-w-[100px] text-center" title="Condition" aria-label="Condition" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Condition</th>
                 <th className="w-[140px] min-w-[140px] text-center" title="Issued / Destroyed" aria-label="Issued / Destroyed" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Issued /<br />Destroyed</th>
                 <th className="w-[240px] min-w-[240px] text-left" title="Special Remarks" aria-label="Special Remarks" style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Special Remarks</th>
-                <th className="w-[150px] min-w-[150px] text-center" title="Label No." aria-label="Label No." style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Label No.</th>
+                <th className="w-[150px] min-w-[150px] text-center" title="Verification Label No." aria-label="Verification Label No." style={{ backgroundColor: '#ffffff', whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none', lineHeight: 1.25, verticalAlign: 'bottom', padding: '10px 12px' }}>Verification<br />Label No.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/60">

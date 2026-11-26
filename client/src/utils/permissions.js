@@ -48,14 +48,27 @@ export const DEFAULT_NOPERM_PERMISSIONS = {
 export const can = (permissionKey, user) => {
   if (!user || !user.role) return false;
 
+  const isCeCom = user.role === 'ce_com' || user.username === 'cecom' || (user.full_name && /CE\s*\(Com\)/i.test(user.full_name));
+
+  // CE (Com) user has manage_verification_teams access but strictly NO User Management access
+  if (isCeCom) {
+    if (permissionKey === 'manage_permissions') return false;
+    if (permissionKey === 'manage_verification_teams') return true;
+  }
+
   // Administrators have full access across all operations
   if (user.role === 'super_admin' || user.role === 'local_admin') {
     return true;
   }
 
-  // Unit Head has full inventory and report operations, but cannot manage users/permissions
+  // Check user's resolved permissions object if explicitly present
+  if (user.permissions && typeof user.permissions[permissionKey] !== 'undefined') {
+    return Boolean(user.permissions[permissionKey]);
+  }
+
+  // Unit Head has full inventory and report operations, but cannot manage users or verification teams unless granted
   if (user.role === 'unit_head') {
-    if (permissionKey === 'manage_permissions') {
+    if (permissionKey === 'manage_permissions' || permissionKey === 'manage_verification_teams') {
       return false;
     }
     return true;
@@ -63,13 +76,12 @@ export const can = (permissionKey, user) => {
 
   // Employee role
   if (user.role === 'employee') {
-    if (user.permission_level === 'no_permission') {
+    if (user.permission_level === 'no_permission' || user.permission_level === 'disposal_only') {
       return false;
     }
 
-    // Check user's resolved permissions object if present
-    if (user.permissions && typeof user.permissions[permissionKey] !== 'undefined') {
-      return Boolean(user.permissions[permissionKey]);
+    if (permissionKey === 'manage_verification_teams') {
+      return Boolean(user.permissions?.manage_verification_teams);
     }
 
     // Fallback based on permission_level tier
