@@ -1,4 +1,4 @@
-// Resolves the backend API URL dynamically so that both localhost and 127.0.0.1 work seamlessly
+// Resolves the backend API URL dynamically so that both relative /api and custom VITE_API_URL work seamlessly
 const resolveApiUrl = () => {
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl) {
@@ -13,13 +13,17 @@ const resolveApiUrl = () => {
     }
     return envUrl;
   }
-  if (typeof window !== 'undefined' && window.location?.hostname === '127.0.0.1') {
-    return 'http://127.0.0.1:5000/api';
-  }
-  return 'http://localhost:5000/api';
+  return '/api';
 };
 
 const API_URL = resolveApiUrl();
+
+const getBaseOrigin = () => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return 'http://localhost:5000';
+};
 
 class ApiError extends Error {
   constructor(message, status, data) {
@@ -43,7 +47,7 @@ const getHeaders = (isFormData = false) => {
 
 export const api = {
   async get(endpoint, params = {}) {
-    const url = new URL(`${API_URL}${endpoint}`);
+    const url = new URL(`${API_URL}${endpoint}`, getBaseOrigin());
     Object.keys(params).forEach(key => {
       if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
         url.searchParams.append(key, params[key]);
@@ -113,7 +117,7 @@ export const api = {
   },
 
   async delete(endpoint, params = {}) {
-    const url = new URL(`${API_URL}${endpoint}`);
+    const url = new URL(`${API_URL}${endpoint}`, getBaseOrigin());
     if (params && typeof params === 'object') {
       Object.keys(params).forEach(key => {
         if (params[key] !== undefined && params[key] !== null && params[key] !== '') {

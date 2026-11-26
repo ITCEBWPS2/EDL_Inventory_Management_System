@@ -1,4 +1,6 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const morgan = require('morgan');
 const env = require('./config/env');
@@ -93,6 +95,48 @@ app.use('/api/audit-logs', auditLogsRoutes);
 app.use('/api/disposal-requests', disposalRequestsRoutes);
 app.use('/api/disposal', disposalRequestsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+
+// Serve static React client (when SERVE_CLIENT is enabled and client/dist exists)
+const distPath = path.resolve(__dirname, '../../client/dist');
+const indexPath = path.join(distPath, 'index.html');
+
+if (env.SERVE_CLIENT) {
+  if (fs.existsSync(indexPath)) {
+    // 1) Serve static assets with sensible cache headers:
+    //    hashed files in /assets get long cache (1y immutable); index.html is no-cache
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html') || path.basename(filePath) === 'index.html') {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          } else if (filePath.includes(path.sep + 'assets' + path.sep) || filePath.includes('/assets/')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        }
+      })
+    );
+
+    // 2) Fallback for React router (plain middleware, works on Express 4 & 5):
+    //    For any GET request that is NOT /api/* and NOT an uploads/static path and accepts HTML, respond with index.html
+    app.use((req, res, next) => {
+      if (req.method !== 'GET') {
+        return next();
+      }
+      if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+        return next();
+      }
+      if (req.accepts('html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.sendFile(indexPath);
+      }
+      return next();
+    });
+
+    console.log(`📦 Serving React client from: ${distPath}`);
+  } else {
+    console.warn(`⚠️ SERVE_CLIENT is true, but client build was not found at ${distPath}. Run "npm --prefix client run build" to build the client.`);
+  }
+}
 
 // 404 Handler
 app.use((req, res) => {
