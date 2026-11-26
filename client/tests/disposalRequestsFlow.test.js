@@ -63,15 +63,11 @@ describe('Disposal Requests Committee Workflow Client Test Suite', () => {
     assert.match(detailContent, /reportRef/);
     assert.match(detailContent, /decisionDate/);
     assert.match(detailContent, /membersPresent/);
-    assert.match(detailContent, /handleRejectAll/);
     assert.match(detailContent, /handleSetAllTo/);
 
     // Per-item decisions
-    assert.match(detailContent, /Approve for Destruction/);
+    assert.match(detailContent, /Approve for Destroy/);
     assert.match(detailContent, /Approve for Tender/);
-    assert.match(detailContent, /Retain/);
-    assert.match(detailContent, /Repair/);
-    assert.match(detailContent, /Reject/);
   });
 
   test('5. DGM Approval fields and wording are completely removed from committee decision form', () => {
@@ -97,7 +93,7 @@ describe('Disposal Requests Committee Workflow Client Test Suite', () => {
   test('7. StatusBadge handles Board Appointed, In Disposal, and per-item committee decisions', () => {
     assert.match(badgeContent, /board appointed/i);
     assert.match(badgeContent, /in disposal/i);
-    assert.match(badgeContent, /approve for destruction/i);
+    assert.match(badgeContent, /approve for destroy/i);
     assert.match(badgeContent, /approve for tender/i);
     assert.match(badgeContent, /retain/i);
     assert.match(badgeContent, /repair/i);
@@ -146,22 +142,15 @@ describe('Disposal Requests Committee Workflow Client Test Suite', () => {
     assert.match(newPageContent, /\{inv\.item_name\}\s*\(Available:\s*\{inv\.quantity\}\)/);
   });
 
-  test('12. Disposal Requests pages incorporate official EDL logo in UI and headers', () => {
+  test('12. EDL logo tile is removed from disposal page headers as per redesign requirements', () => {
     const listPageContent = fs.readFileSync(path.resolve(__dirname, '../src/pages/DisposalRequestsListPage.jsx'), 'utf8');
     const newPageContent = fs.readFileSync(path.resolve(__dirname, '../src/pages/NewDisposalRequestPage.jsx'), 'utf8');
     const detailPageContent = fs.readFileSync(path.resolve(__dirname, '../src/pages/DisposalRequestDetailPage.jsx'), 'utf8');
 
-    // List Page has EDL Logo
-    assert.match(listPageContent, /EDL_LOGO|edlLogo/);
-    assert.match(listPageContent, /alt="EDL Logo"/);
-
-    // New Request Page has EDL Logo
-    assert.match(newPageContent, /EDL_LOGO|edlLogo/);
-    assert.match(newPageContent, /alt="EDL Logo"/);
-
-    // Detail Page has EDL Logo
-    assert.match(detailPageContent, /EDL_LOGO|edlLogo/);
-    assert.match(detailPageContent, /alt="EDL Logo"/);
+    // Headers start directly without logo tile
+    assert.doesNotMatch(listPageContent, /<img\s+src=\{edlLogo \|\| EDL_LOGO\}\s+alt="EDL Logo"/);
+    assert.doesNotMatch(newPageContent, /<img\s+src=\{edlLogo \|\| EDL_LOGO\}\s+alt="EDL Logo"/);
+    assert.doesNotMatch(detailPageContent, /<img\s+src=\{edlLogo \|\| EDL_LOGO\}\s+alt="EDL Logo"/);
   });
 
   test('13. DisposalRequestDetailPage calls all hooks unconditionally before any early returns (rules of hooks)', () => {

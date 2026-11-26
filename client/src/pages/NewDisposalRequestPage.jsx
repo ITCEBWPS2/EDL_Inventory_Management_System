@@ -118,7 +118,7 @@ export const NewDisposalRequestPage = () => {
             setInventoryList(res.data || []);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [unitId, selectedUnitId]);
 
@@ -176,7 +176,7 @@ export const NewDisposalRequestPage = () => {
 
   const validateForm = () => {
     if (!unitId) {
-      toast.error('Please select an operational unit.');
+      toast.error('Please select a unit.');
       return false;
     }
     if (!title.trim()) {
@@ -265,30 +265,13 @@ export const NewDisposalRequestPage = () => {
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Branded EDL Hero Header */}
         <div className="bg-gradient-to-r from-card via-surface/60 to-card border border-line rounded-2xl p-5 shadow-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="h-14 w-14 rounded-2xl bg-white border border-[#7B1C3E]/15 shadow-sm p-2 flex items-center justify-center shrink-0">
-              <img
-                src={edlLogo || EDL_LOGO}
-                alt="EDL Logo"
-                className="h-full w-auto object-contain select-none"
-                onError={(e) => { e.currentTarget.src = EDL_LOGO; }}
-              />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-bold text-ink tracking-tight">
-                  {editId ? 'Edit Draft Disposal Request' : 'New Disposal Request'}
-                </h1>
-                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-[#7B1C3E]/10 text-[#7B1C3E] border border-[#7B1C3E]/20">
-                  Board of Survey
-                </span>
-              </div>
-              <p className="text-xs text-slate mt-1 flex flex-wrap items-center gap-1.5">
-                <span>Electricity Distribution Lanka</span>
-                <span>&bull;</span>
-                <span>Initiate a formal asset write-off and disposal workflow</span>
-              </p>
-            </div>
+          <div>
+            <h1 className="text-xl font-bold text-ink tracking-tight">
+              {editId ? 'Edit Draft Disposal Request' : 'New Disposal Request'}
+            </h1>
+            <p className="text-xs text-slate mt-1 flex flex-wrap items-center gap-1.5">
+              <span>Initiate a formal asset write-off and disposal workflow</span>
+            </p>
           </div>
           <BackButton to="/disposal-requests" label="Back to List" />
         </div>
@@ -306,7 +289,7 @@ export const NewDisposalRequestPage = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-ink mb-1">
-                    Operational Unit <span className="text-rose-500">*</span>
+                    Unit <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={unitId}

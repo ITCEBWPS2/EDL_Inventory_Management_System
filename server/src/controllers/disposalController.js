@@ -834,7 +834,7 @@ const disposalController = {
         }
       });
 
-      const VALID_DECISIONS = ['Approve for Destruction', 'Approve for Tender', 'Retain', 'Repair', 'Reject'];
+      const VALID_DECISIONS = ['Approve for Destroy', 'Approve for Destruction', 'Approve for Tender', 'Retain', 'Repair', 'Reject'];
 
       // Validate that every single item in the request has a decision
       for (const item of request.items) {
@@ -858,7 +858,7 @@ const disposalController = {
         item.committee_decision_item = dec.decision;
         item.committee_remarks = dec.remarks;
 
-        if (dec.decision === 'Approve for Destruction' || dec.decision === 'Approve for Tender') {
+        if (dec.decision === 'Approve for Destroy' || dec.decision === 'Approve for Destruction' || dec.decision === 'Approve for Tender') {
           item.serial_status = 'approved_for_disposal';
           approvedCount++;
         } else {
@@ -876,9 +876,15 @@ const disposalController = {
         }
       });
 
-      // Handle optional report scan attachment
+      // Handle optional report scan attachment (max 300 KB)
       let attachmentObj = null;
       if (req.file) {
+        if (req.file.size > 300 * 1024) {
+          return res.status(400).json({
+            success: false,
+            message: `Attachment file is too large (${Math.round(req.file.size / 1024)} KB). Maximum allowed size is 300 KB.`
+          });
+        }
         attachmentObj = await storageService.uploadDisposalAttachment(req.file, request.request_no);
       }
 
@@ -994,7 +1000,7 @@ const disposalController = {
 
       let bodyData = req.body;
       const type = (bodyData.type || '').trim().toLowerCase(); // 'destruction' | 'tender'
-      const reference = (bodyData.reference || '').trim();
+      let reference = (bodyData.reference || '').trim();
       const date = (bodyData.date || '').trim();
       const remarks = (bodyData.remarks || '').trim();
       const waybillNo = (bodyData.waybill_no || '').trim();
@@ -1002,8 +1008,11 @@ const disposalController = {
       if (type !== 'destruction' && type !== 'tender') {
         return res.status(400).json({ success: false, message: 'Disposal type must be either "destruction" or "tender".' });
       }
-      if (!reference) {
+      if (type === 'destruction' && !reference) {
         return res.status(400).json({ success: false, message: 'Reference number / Certificate number is required.' });
+      }
+      if (type === 'tender' && !reference) {
+        reference = waybillNo;
       }
       if (!date) {
         return res.status(400).json({ success: false, message: 'Disposal date is required.' });
@@ -1052,8 +1061,8 @@ const disposalController = {
       }
 
       // Validate that all selected items were approved for this disposal type and not already disposed
-      const requiredDecision = type === 'destruction' ? 'Approve for Destruction' : 'Approve for Tender';
-      const targetDisposition = type === 'destruction' ? 'destroyed' : 'sold';
+      const isDestroy = type === 'destruction';
+      const targetDisposition = isDestroy ? 'destroyed' : 'sold';
 
       const itemsToDispose = [];
       for (const id of itemIds) {
@@ -1064,10 +1073,13 @@ const disposalController = {
         if (item.final_disposition) {
           return res.status(400).json({ success: false, message: `Item "${item.item_name}" has already been disposed (${item.final_disposition}).` });
         }
-        if (item.committee_decision_item !== requiredDecision) {
+        const matchesDecision = isDestroy
+          ? (item.committee_decision_item === 'Approve for Destroy' || item.committee_decision_item === 'Approve for Destruction')
+          : (item.committee_decision_item === 'Approve for Tender');
+        if (!matchesDecision) {
           return res.status(400).json({
             success: false,
-            message: `Item "${item.item_name}" was decided as "${item.committee_decision_item}", not "${requiredDecision}".`
+            message: `Item "${item.item_name}" was decided as "${item.committee_decision_item}", not valid for "${type}".`
           });
         }
         itemsToDispose.push(item);
@@ -1076,6 +1088,12 @@ const disposalController = {
       // Handle optional attachment
       let attachmentObj = null;
       if (req.file) {
+        if (type === 'tender' && req.file.size > 300 * 1024) {
+          return res.status(400).json({
+            success: false,
+            message: 'Way Bill file is too large. Maximum allowed size is 300 KB.'
+          });
+        }
         attachmentObj = await storageService.uploadDisposalAttachment(req.file, `${request.request_no}_${type}`);
       }
 
@@ -1128,7 +1146,7 @@ const disposalController = {
 
       // Check if ALL approved items are now disposed
       const allApprovedItems = request.items.filter(
-        i => i.committee_decision_item === 'Approve for Destruction' || i.committee_decision_item === 'Approve for Tender'
+        i => i.committee_decision_item === 'Approve for Destroy' || i.committee_decision_item === 'Approve for Destruction' || i.committee_decision_item === 'Approve for Tender'
       );
       const allApprovedDisposed = allApprovedItems.every(i => Boolean(i.final_disposition));
 
@@ -1242,7 +1260,7 @@ const disposalController = {
         newStatus = 'approved';
         request.disposal_records = [];
         request.items.forEach(item => {
-          if (item.committee_decision_item === 'Approve for Destruction' || item.committee_decision_item === 'Approve for Tender') {
+          if (item.committee_decision_item === 'Approve for Destroy' || item.committee_decision_item === 'Approve for Destruction' || item.committee_decision_item === 'Approve for Tender') {
             item.final_disposition = null;
             item.disposal_ref = null;
             item.serial_status = 'approved_for_disposal';

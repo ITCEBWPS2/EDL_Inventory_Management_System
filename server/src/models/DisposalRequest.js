@@ -40,7 +40,7 @@ const DisposalItemSchema = new mongoose.Schema(
     condition_notes: { type: String, default: '', trim: true },
     committee_decision_item: {
       type: String,
-      enum: ['Approve for Destruction', 'Approve for Tender', 'Retain', 'Repair', 'Reject', null],
+      enum: ['Approve for Destruction', 'Approve for Destroy', 'Approve for Tender', 'Retain', 'Repair', 'Reject', null],
       default: null
     },
     committee_remarks: { type: String, default: '', trim: true },

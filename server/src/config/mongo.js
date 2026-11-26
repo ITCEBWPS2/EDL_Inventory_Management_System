@@ -25,6 +25,7 @@ async function connect(uri) {
   try {
     const conn = await mongoose.connect(targetUri, {
       autoIndex: true,
+      serverSelectionTimeoutMS: 5000,
     });
     isConnected = true;
 
@@ -34,6 +35,21 @@ async function connect(uri) {
     return conn;
   } catch (error) {
     console.error('❌ MongoDB connection error:', error.message);
+    // In development: if remote cluster (Atlas) fails to connect, fallback to local MongoDB
+    if (process.env.NODE_ENV !== 'production' && targetUri.includes('mongodb+srv://') && targetUri !== 'mongodb://127.0.0.1:27017/edl_ims') {
+      console.warn('⚠️ Atlas connection failed. Attempting local MongoDB fallback at mongodb://127.0.0.1:27017/edl_ims...');
+      try {
+        const localConn = await mongoose.connect('mongodb://127.0.0.1:27017/edl_ims', {
+          autoIndex: true,
+          serverSelectionTimeoutMS: 3000,
+        });
+        isConnected = true;
+        console.log(`📦 MongoDB connected via fallback: ${mongoose.connection.name} at ${mongoose.connection.host}`);
+        return localConn;
+      } catch (fallbackErr) {
+        console.error('❌ Local fallback connection also failed:', fallbackErr.message);
+      }
+    }
     throw error;
   }
 }

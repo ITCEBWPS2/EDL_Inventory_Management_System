@@ -22,7 +22,7 @@ export const BoardOfSurveyPrint = ({ request }) => {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <p><strong>Disposal Request No:</strong> {request.request_no}</p>
-            <p><strong>Operational Unit:</strong> {request.unit_name || request.unit_id}</p>
+            <p><strong>Unit:</strong> {request.unit_name || request.unit_id}</p>
             <p><strong>Request Title:</strong> {request.title}</p>
           </div>
           <div>
@@ -76,7 +76,6 @@ export const BoardOfSurveyPrint = ({ request }) => {
             <tr className="bg-gray-100">
               <th className="border border-black px-2 py-1 text-center w-8">#</th>
               <th className="border border-black px-2 py-1 text-left">Item Description</th>
-              <th className="border border-black px-2 py-1 text-left w-24">Item Code</th>
               <th className="border border-black px-2 py-1 text-center w-12">Qty</th>
               <th className="border border-black px-2 py-1 text-left">Serial Number(s)</th>
               <th className="border border-black px-2 py-1 text-left">Condition / Reason</th>
@@ -88,13 +87,12 @@ export const BoardOfSurveyPrint = ({ request }) => {
             {items.map((item, idx) => {
               const serials = Array.isArray(item.serial_numbers) && item.serial_numbers.length > 0
                 ? item.serial_numbers.join(', ')
-                : (item.serial_number || '—');
+                : (item.serial_number || item.item_code || '—');
 
               return (
                 <tr key={item.id || idx}>
                   <td className="border border-black px-2 py-1 text-center">{idx + 1}</td>
                   <td className="border border-black px-2 py-1 font-medium">{item.item_name}</td>
-                  <td className="border border-black px-2 py-1 font-mono text-[10px]">{item.item_code || '—'}</td>
                   <td className="border border-black px-2 py-1 text-center">{item.quantity}</td>
                   <td className="border border-black px-2 py-1 font-mono text-[10px]">{serials}</td>
                   <td className="border border-black px-2 py-1">{item.condition_notes || '—'}</td>

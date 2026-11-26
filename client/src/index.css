@@ -7,6 +7,16 @@
 
 :root {
   /* EDL Brand Colour Tokens */
+  --brand-maroon: #7B1C3E;
+  --brand-maroon-dark: #5B1A3A;
+  --brand-gold: #F4B731;
+  --brand-gold-tint: #FFF4D6;
+  --brand-maroon-tint: #F7E9EE;
+  --brand-maroon-dark-tint: #EBD3DC;
+  --brand-gold-dark: #7A5600;
+  --brand-gold-text: #3A2A00;
+  --brand-red: #B3261E;
+
   --edl-ink: #280818;
   --edl-deep: #3b0c20;
   --edl-maroon: #5a1230;

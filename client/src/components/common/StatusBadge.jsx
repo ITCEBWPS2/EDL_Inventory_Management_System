@@ -1,41 +1,48 @@
 import React from 'react';
 
 export const StatusBadge = ({ status, type }) => {
-  const norm = (status || type || '').toString().toLowerCase();
+  const norm = (status || type || '').toString().toLowerCase().trim();
 
-  let bgClass = 'bg-[#8a7a80]/12 text-[#8a7a80]';
-  let dotClass = 'bg-[#8a7a80]';
+  let bgClass = 'bg-[#EEEAE8] text-[#4A4D5A] border border-[#DDD8D5]';
+  let dotClass = 'bg-[#4A4D5A]';
 
-  if (norm === 'issued' || norm.startsWith('issue')) {
+  // Specific Disposal Workflow Statuses & Committee Decisions (EDL Brand Palette)
+  if (norm === 'draft') {
+    bgClass = 'bg-[#EEEAE8] text-[#4A4D5A] border border-[#DDD8D5]';
+    dotClass = 'bg-[#4A4D5A]';
+  } else if (norm === 'submitted') {
+    bgClass = 'bg-[#FFF4D6] text-[#7A5600] border border-[#F4B731]/40';
+    dotClass = 'bg-[#7A5600]';
+  } else if (norm === 'board appointed' || norm === 'board_appointed') {
+    bgClass = 'bg-[#F7E9EE] text-[#7B1C3E] border border-[#7B1C3E]/30';
+    dotClass = 'bg-[#7B1C3E]';
+  } else if (norm === 'approved') {
+    bgClass = 'bg-[#F4B731] text-[#3A2A00] border border-[#DE9E16] font-bold';
+    dotClass = 'bg-[#3A2A00]';
+  } else if (norm === 'in disposal' || norm === 'in_disposal') {
+    bgClass = 'bg-[#EBD3DC] text-[#5B1A3A] border border-[#7B1C3E]/30';
+    dotClass = 'bg-[#5B1A3A]';
+  } else if (norm === 'completed') {
+    bgClass = 'bg-[#7B1C3E] text-white border border-[#5B1A3A]';
+    dotClass = 'bg-white';
+  } else if (norm === 'rejected' || norm === 'reject') {
+    bgClass = 'bg-white text-[#B3261E] border border-[#B3261E]';
+    dotClass = 'bg-[#B3261E]';
+  } else if (norm === 'approve for destruction' || norm === 'approve for destroy') {
+    bgClass = 'bg-[#F7E9EE] text-[#7B1C3E] border border-[#7B1C3E]/30';
+    dotClass = 'bg-[#7B1C3E]';
+  } else if (norm === 'approve for tender') {
+    bgClass = 'bg-[#FFF4D6] text-[#7A5600] border border-[#F4B731]/40';
+    dotClass = 'bg-[#7A5600]';
+  } else if (norm === 'retain') {
+    bgClass = 'bg-[#EEEAE8] text-[#4A4D5A] border border-[#DDD8D5]';
+    dotClass = 'bg-[#4A4D5A]';
+  } else if (norm === 'repair') {
+    bgClass = 'bg-white text-[#7B1C3E] border border-[#7B1C3E]';
+    dotClass = 'bg-[#7B1C3E]';
+  } else if (norm === 'issued' || norm.startsWith('issue')) {
     bgClass = 'bg-[#2e7d58]/12 text-[#2e7d58] border border-[#2e7d58]/40';
     dotClass = 'bg-[#2e7d58]';
-  } else if (norm === 'board appointed' || norm === 'board_appointed') {
-    bgClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
-    dotClass = 'bg-indigo-600';
-  } else if (norm === 'submitted') {
-    bgClass = 'bg-sky-50 text-sky-700 border border-sky-200';
-    dotClass = 'bg-sky-600';
-  } else if (norm === 'approved' || norm === 'approve for tender') {
-    bgClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-    dotClass = 'bg-emerald-600';
-  } else if (norm === 'approve for destruction') {
-    bgClass = 'bg-rose-50 text-rose-700 border border-rose-200';
-    dotClass = 'bg-rose-600';
-  } else if (norm === 'in disposal' || norm === 'in_disposal') {
-    bgClass = 'bg-amber-50 text-amber-800 border border-amber-200';
-    dotClass = 'bg-amber-600';
-  } else if (norm === 'completed') {
-    bgClass = 'bg-teal-50 text-teal-800 border border-teal-200';
-    dotClass = 'bg-teal-600';
-  } else if (norm === 'rejected' || norm === 'reject') {
-    bgClass = 'bg-rose-50 text-rose-700 border border-rose-200';
-    dotClass = 'bg-rose-600';
-  } else if (norm === 'retain') {
-    bgClass = 'bg-slate-100 text-slate-700 border border-slate-300';
-    dotClass = 'bg-slate-500';
-  } else if (norm === 'repair') {
-    bgClass = 'bg-amber-50 text-amber-700 border border-amber-300';
-    dotClass = 'bg-amber-600';
   } else if (norm === 'destroyed' || norm === 'scrapped' || norm.startsWith('destroy')) {
     bgClass = 'bg-[#b33947]/12 text-[#b33947] border border-[#b33947]/40';
     dotClass = 'bg-[#b33947]';
@@ -66,7 +73,6 @@ export const StatusBadge = ({ status, type }) => {
     norm.includes('transfer') ||
     norm.includes('auction') ||
     norm.includes('progress') ||
-    norm.includes('draft') ||
     norm.includes('fair') ||
     norm.includes('not counted') ||
     norm.includes('not started')
@@ -79,9 +85,9 @@ export const StatusBadge = ({ status, type }) => {
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold tracking-wide ${bgClass}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`}></span>
-      {status || type}
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold tracking-wide ${bgClass}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`}></span>
+      <span className="leading-none">{status || type}</span>
     </span>
   );
 };
